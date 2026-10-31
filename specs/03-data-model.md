@@ -140,17 +140,47 @@ CREATE TABLE reminders_shown (                -- REQ-024: show each due reminder
 
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
--- Full-text search (REQ-051). External content, kept in sync by triggers.
+-- Full-text search (REQ-051). Stores its own copy of the text (ADR-010); rowid = notes.rowid.
 CREATE VIRTUAL TABLE notes_fts USING fts5(
   title, body_md, labels, path_display,
-  content='', tokenize='unicode61 remove_diacritics 2', prefix='2 3'
+  tokenize='unicode61 remove_diacritics 2', prefix='2 3'
 );
 ```
 
-`notes_fts.labels` is a space-joined list of label names, maintained by the repository on every
-upsert (simpler than triggers across the junction table). Ranking is `bm25(notes_fts, 10, 1, 5, 2)`
+`notes_fts` rows are keyed by `notes.rowid` and written by the repository (no triggers) on every
+upsert, rebind, label rename/delete and purge. Soft-deleted notes keep their FTS row, so Undo is
+cheap, and search filters them out with a join. `notes` rows are only ever changed with
+`UPDATE` / `INSERT … ON CONFLICT DO UPDATE` (never `INSERT OR REPLACE`), so the rowid is stable.
+Running `VACUUM` requires rebuilding `notes_fts` afterwards.
+`notes_fts.labels` is a space-joined list of label names (simpler than triggers across the
+junction table). Ranking is `bm25(notes_fts, 10, 1, 5, 2)`
 (title > labels > path > body). Typo tolerance: if FTS returns fewer than 5 hits, fall back to a
 trigram/Levenshtein pass over titles and labels in memory (fine up to 10k notes).
+
+## Storage conventions (T1.5)
+
+| Value | Stored as |
+|---|---|
+| `id` | GUID, lower-case `D` format (`8f0c1a2b-…`) |
+| Timestamps | UTC ISO 8601 with milliseconds, `yyyy-MM-ddTHH:mm:ss.fffZ` (fixed width, sorts as text) |
+| Dates | `yyyy-MM-dd` |
+| `status`, `volume_kind`, colors | the lower-case keys from `NoteStatus`, `VolumeKind`, `Palette` |
+
+**Schema versions** (`PRAGMA user_version`): `0` = empty file, `1` = the tables above plus the
+REQ-013 starter labels. Before migrating a database that has `user_version ≥ 1`, the app copies it
+with the SQLite online-backup API to `%LOCALAPPDATA%\FolderNotes\backups\notes-v<from>-<UTC yyyyMMddHHmmss>.db`.
+A database with a *newer* version than the app knows is opened read-only and reported, never downgraded.
+
+**Repository rules:**
+- Upsert sets `updated_at` to now. On first insert it keeps `created_at` from the note. Import (T1.7)
+  keeps both timestamps.
+- Labels on an upserted note are matched to existing labels by name, ignoring case (the existing
+  label's color wins). Unknown names create the label (inline create, REQ-011).
+- A second live note for the same `path_norm` or `(volume_serial, file_id)` gives
+  `DuplicateFolderNoteException` with the existing note's id (REQ-001). The editor opens that note.
+- Upserting a soft-deleted note fails. Restore it first.
+- Restore fails with `DuplicateFolderNoteException` if another live note has taken the folder in the meantime.
+- Soft-deleted notes are purged 30 days after `deleted_at` (`PurgeDeletedAsync`).
 
 ## Tooltip read path (shell extension, REQ-040/041)
 

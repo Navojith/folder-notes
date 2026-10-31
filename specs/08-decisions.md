@@ -98,3 +98,27 @@ to a new folder created where a moved folder used to be.
 **Decision:** Look up by file ID first. On a path match with a different ID, attach (and re-bind)
 only if the original ID no longer resolves. Canonicalize paths with `GetFinalPathNameByHandle`.
 See `03-data-model.md`.
+
+## ADR-010: The FTS5 index stores its own text, keyed by `notes.rowid` — *accepted (T1.5, 2026-10-31)*
+
+**Context:** Spec 03 first had a contentless FTS5 table (`content=''`). Contentless tables can't
+`UPDATE`, and deleting a row needs the old column values. They also can't return the text for
+`highlight()` or `snippet()`, which the search palette needs (05 § Search palette). An external
+content table would need triggers across `notes` and the label junction table.
+**Decision:** A normal FTS5 table that stores its own copy of title, body, labels and path. The
+repository writes it, with `rowid = notes.rowid`. `notes` rows are never replaced
+(`INSERT OR REPLACE`), so the rowid stays stable. `VACUUM` must be followed by an index rebuild.
+**Consequences:** The note text is stored twice (about 2× the body size, which is fine at 10k
+notes). Deletes and updates are single-row operations by rowid. Highlights come straight from FTS5.
+
+## ADR-011: Single writer = one connection + one Channel-drained task — *accepted (T1.5, 2026-10-31)*
+
+**Context:** SQLite allows one writer at a time. Several app components (editor autosave, panel,
+orphan scan, import) write concurrently.
+**Decision:** `SqliteNoteStore` owns one write connection. Every write is a delegate posted to an
+unbounded `Channel` and run in its own transaction by a single background task. The caller awaits
+a `TaskCompletionSource`. Reads open pooled `Mode=ReadOnly` connections and rely on WAL snapshots.
+`NoteChanged` is raised after commit.
+**Consequences:** There's no `SQLITE_BUSY` between our own writers, and writes are applied in
+order. Event handlers run on the writer task, so UI subscribers must marshal to their dispatcher,
+and a slow handler delays the next write.

@@ -78,7 +78,9 @@ folder-notes/
 ## Process & concurrency model
 
 - **Single writer:** only `FolderNotes.exe` writes to `notes.db`. All writes go through
-  `INoteRepository` on a dedicated serialized writer (async queue).
+  `INoteRepository` on a dedicated serialized writer: one long-lived connection drained by one
+  task from an unbounded `Channel` (ADR-011). Callers `await` their write. Reads use pooled
+  read-only connections and never wait for the queue.
 - **Readers:** the app's UI and the shell extension in Explorer. SQLite WAL lets readers run
   alongside the writer. The shell extension opens with `SQLITE_OPEN_READONLY`,
   `busy_timeout=30 ms`, and caches the connection per thread.
@@ -110,8 +112,22 @@ public interface INoteRepository {
     Task DeleteAsync(Guid id, CancellationToken ct = default);   // soft-delete for undo
     Task RestoreAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<Note>> ListAsync(NoteQuery query, CancellationToken ct = default);
-    event EventHandler<NoteChangedEventArgs> NoteChanged;
+    Task<int> PurgeDeletedAsync(TimeSpan olderThan, CancellationToken ct = default);
+    Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default); // REQ-061
+    Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default);
+    event EventHandler<NoteChangedEventArgs> NoteChanged;  // raised after commit, on the writer thread
 }
+// GetByFolderAsync runs the ADR-009 lookup (03 § Lookup algorithm) and does the re-binding itself.
+
+public interface ILabelRepository {                  // REQ-010, 012, 013
+    Task<IReadOnlyList<Label>> ListLabelsAsync(CancellationToken ct = default);
+    Task<Label> CreateLabelAsync(string name, string color, CancellationToken ct = default);
+    Task<Label> UpdateLabelAsync(Label label, CancellationToken ct = default); // rename/recolor
+    Task DeleteLabelAsync(Guid id, CancellationToken ct = default);
+    event EventHandler LabelsChanged;
+}
+// Both are implemented by SqliteNoteStore (FolderNotes.Core.Storage). OrphanScanner runs the
+// 03 § Orphan detection pass over the repository and IFolderIdentityService.
 
 public interface ISearchService {
     Task<IReadOnlyList<SearchHit>> SearchAsync(string rawQuery, int limit, CancellationToken ct);
