@@ -40,7 +40,8 @@
 
 | Concern | Choice | Why (see ADRs) |
 |---|---|---|
-| App UI | **WinUI 3 / Windows App SDK 1.6+, C# .NET 8** | Native Fluent look, Mica, dark mode, accessibility (ADR-001) |
+| App UI | **WinUI 3 / Windows App SDK 2.x, C# .NET 10 (LTS)** | Native Fluent look, Mica, dark mode, accessibility (ADR-001) |
+| COM interop | **CsWin32 / `[GeneratedComInterface]`, typed only** | `dynamic` COM crashed and was slow in S1 (ADR-007) |
 | MVVM | CommunityToolkit.Mvvm | Source-generated, low boilerplate |
 | Storage | **SQLite** via `Microsoft.Data.Sqlite`, FTS5 | Single file, fast, concurrent readers via WAL (ADR-003) |
 | Shell extension | **Native C++20 DLL**, WRL/`winrt::implements`, sqlite3 amalgamation | Microsoft advises against managed in-proc shell extensions (ADR-002) |

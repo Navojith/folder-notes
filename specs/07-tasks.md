@@ -12,23 +12,30 @@ Legend: 🔬 spike · 🧱 build · ✅ verify
 Goal: prove the three risky mechanisms work before any production code exists.
 Output: findings in `04-explorer-integration.md` + ADRs in `08-decisions.md`.
 
-- [ ] **S1 🔬 Active folder + tabs tracking** (REQ-031, REQ-034)
+- [x] **S1 🔬 Active folder + tabs tracking** (REQ-031, REQ-034): *done 2026-10-31 on Win11 23H2;
+  39/39 passed, tab switch ≤117 ms. Win10 isn't available on this machine, so it moves to the
+  T3.5 manual matrix. See 04 § S1 findings, ADR-004/007.*
   C# console app in `spikes/S1-tracker/`: print the active Explorer folder on every change
   (window switch, navigation, tab switch, new and closed tab, virtual folders).
   *Done when:* correct on Win10 + Win11 24H2 with tabs, and measured latency is ≤150 ms. The
   active-tab detection method is documented.
-- [ ] **S2 🔬 Docked WinUI 3 tool window** (REQ-030, 033, 038)
+- [x] **S2 🔬 Docked WinUI 3 tool window** (REQ-030, 033, 038): *done 2026-10-31; 13/13 passed,
+  0 px error, 14 ms median. Interactive-drag feel, mixed DPI and Win10 are still to be checked
+  by hand (T3.5). See 04 § S2 findings, ADR-008.*
   `spikes/S2-dock/`: a WinUI 3 window owned by an Explorer HWND that follows move, resize,
   maximize, snap and minimize without stealing focus, on mixed-DPI monitors.
   *Done when:* no visible lag or gap, no focus theft, and it isn't in Alt+Tab. If WinUI 3 can't
   do it cleanly, record the alternative (e.g. a Win32 host with XAML Islands) in an ADR.
-- [ ] **S3 🔬 Folder infotip handler** (REQ-040, 041)
+- [ ] **S3 🔬 Folder infotip handler** (REQ-040, 041): ⛔ *blocked: the MSVC C++ toolset and
+  Windows SDK aren't installed (VS 2022 Community has no "Desktop development with C++" workload).*
   `spikes/S3-infotip/`: a minimal C++ `IQueryInfo` handler registered in HKCU for `Directory`,
   returning static text.
   *Done when:* it's documented in which views (Details, Icons, Tiles, nav pane, desktop) the tip
   appears on Win10/Win11, how it merges with the default tip, and whether emoji render. If it
   doesn't work, ADR-006 picks the fallback.
-- [ ] **S4 🔬 Folder identity** (REQ-060)
+- [x] **S4 🔬 Folder identity** (REQ-060): *done 2026-10-31; 14/14 passed on NTFS. Found that
+  recreated folders get new IDs, so the lookup was revised (ADR-009). exFAT, ReFS, network and
+  OneDrive are untested.*
   Confirm that `FILE_ID_INFO` stays stable across rename and same-volume move on NTFS, and what
   happens with OneDrive-synced folders, ReFS, exFAT and network shares. Confirm that
   `OpenFileById` relinks.

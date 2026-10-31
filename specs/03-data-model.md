@@ -16,17 +16,46 @@ A folder is identified by a **FolderRef**:
 | `file_id` | `FILE_ID_INFO.FileId` (128-bit, hex) | stable across rename/move on the same volume (NTFS & ReFS) |
 | `volume_kind` | `fixed` / `removable` / `network` | from `GetDriveType` |
 
-**Lookup algorithm** `GetByFolder(path)`:
-1. Normalize the path, then look up by `path_norm`. If found and (no file_id, or file_id matches), return the note.
-2. Otherwise, if the volume supports file IDs, open the folder (`FILE_FLAG_BACKUP_SEMANTICS`, no
-   share restrictions), read `(volume_serial, file_id)`, and look up by that pair. If found, the
-   folder was renamed or moved: **update `path_norm`/`path_display`** (the app does this; the shell
-   extension just returns the note) and return it.
+**Canonical path (from S4).** Before any lookup, open the folder (`FILE_READ_ATTRIBUTES`,
+`FILE_FLAG_BACKUP_SEMANTICS`, share all) and use `GetFinalPathNameByHandle` as the canonical
+path. This resolves `subst` drives, 8.3 short names, `\\?\` prefixes and casing to one spelling
+(it costs about 0.01–0.04 ms). The string normalizer (shared vectors) is only the fallback for
+paths that can't be opened.
+
+**Lookup algorithm** `GetByFolder(path)`, revised after S4:
+1. Read `(volume_serial, file_id)` for the folder. If a note has that pair, **return it** (and,
+   in the app only, update `path_norm`/`path_display` if they differ: the folder was renamed or moved).
+2. Otherwise, look up by `path_norm`. If a note matches by path but has a *different* `file_id`:
+   - If the stored `file_id` still resolves (`OpenFileById`) to a live folder outside the Recycle
+     Bin, the original folder **moved away** and this is a different folder at the old path.
+     Return **no note**.
+   - Otherwise the original folder is gone and this folder was **recreated at the same path**
+     (for example a build tool wiping and rebuilding `bin\`). Return the note, and the app
+     re-binds the note's `file_id` to the new folder. This is what makes "build output, safe to
+     wipe" notes survive a rebuild.
 3. Otherwise, there's no note.
+
+The shell extension runs steps 1 and 2 read-only. For the step 2 decision, it returns the note
+only if the stored `file_id` doesn't resolve. Re-binding is left to the app.
 
 **Orphan detection** (background, at startup, then every 6 h, and on demand): for each note, if the
 path doesn't exist, try `OpenFileById(volume, file_id)` → `GetFinalPathNameByHandle` to find the
-new path. If that fails, set `orphaned_at`.
+new path. If it resolves under `\$Recycle.Bin\`, mark the note **orphaned (in Recycle Bin)**
+rather than relinking it. If it doesn't resolve, set `orphaned_at`.
+
+### S4 findings (2026-10-31, Windows 11 23H2 build 22631, NTFS)
+
+| Case | Result |
+|---|---|
+| Rename / move to another parent / ancestor renamed | file ID unchanged ✅ |
+| `OpenFileById` relink after move | finds the new path ✅, 0.04 ms |
+| Copy | new file ID (a copy doesn't inherit the note) ✅ |
+| Delete + recreate at the same path | **new file ID**, so the lookup needs the step 2 rule above |
+| Deleted folder | `OpenFileById` fails, so the note is orphaned ✅ |
+| Sent to Recycle Bin | ID still resolves, to `C:\$Recycle.Bin\<SID>\$R…`, so it must be detected explicitly |
+| `subst` alias, 8.3 short name, `\\?\`, upper-case | same file ID ✅ |
+| `GetId` cost | 0.01 ms |
+| **Not tested** (no hardware or access): exFAT/FAT32 (no stable 128-bit IDs expected), ReFS, network shares, OneDrive Files-On-Demand folders (deliberately avoided, since they would sync to the cloud), cross-volume moves (expected new ID; path fallback applies) |
 
 ## Tables
 

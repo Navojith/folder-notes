@@ -28,6 +28,38 @@ same 50 ms budget as the tooltip).
 
 ## 4.2 Companion panel (REQ-030..038)
 
+### S1 findings (2026-10-31, Windows 11 23H2 build 22631, single window + tabs)
+
+All 39 scripted scenarios passed using **events only (no polling)**:
+
+| Scenario | median | max | trigger that fired |
+|---|---|---|---|
+| Navigate (different folder name) | 49 ms | 107 ms | `EVENT_OBJECT_NAMECHANGE` |
+| Navigate between two folders with the **same name** (`One\src` → `Two\src`) | 51 ms | 65 ms | `NAMECHANGE` (it fires on child windows too, so a title change isn't required) |
+| Unicode path, virtual folder (This PC → null) | 50 ms | 54 ms | `NAMECHANGE` |
+| New tab (Ctrl+T → Home → null) | 287 ms | — | includes Explorer creating the tab |
+| Switch tab (Ctrl+Tab / Ctrl+Shift+Tab) | 100 ms | 117 ms | `NAMECHANGE` |
+| Switch window | 28 ms | 72 ms | `EVENT_SYSTEM_FOREGROUND` |
+| Minimize | 14 ms | — | `EVENT_SYSTEM_MINIMIZESTART` |
+
+Learnings that are now **requirements on the implementation**:
+- **Active tab = the *visible* `ShellTabWindowClass` child** of the frame, matched to the shell
+  window entry whose `QueryService(SID_STopLevelBrowser) → IShellBrowser::GetWindow` returns that
+  HWND. The "first child in z-order" heuristic disagreed twice in transient states, so it's a
+  tie-breaker only.
+- **Do not use C# `dynamic` for COM.** The `dynamic` binder's type-library cache isn't
+  thread-safe, and it crashed (`ArgumentException`) when two STA threads used it. Use typed
+  interop (CsWin32 / `[GeneratedComInterface]`).
+- **Evaluation cost is the bottleneck.** Re-enumerating `IShellWindows` with late-bound calls
+  costs an average of 34 ms (p95 89 ms) per evaluation, which is most of the tab-switch
+  latency. The production tracker must cache the browser→(frame, tab HWND) map (refreshed on
+  `DShellWindowsEvents`), query only the active tab's path, and coalesce bursts of `NAMECHANGE`
+  events. **Target: under 10 ms per evaluation.**
+- Hooks only *post* a message; all COM work runs on the tracker's STA loop (never re-entrantly
+  inside a WinEvent callback).
+- The polling fallback stays (it costs nothing while Explorer isn't in the foreground), at 500 ms,
+  as a safety net only.
+
 ### Detecting the active Explorer folder (`ExplorerTracker`)
 
 1. `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)`, out-of-context, to see when an Explorer window
@@ -43,8 +75,9 @@ same 50 ms budget as the tooltip).
    `ShellTabWindowClass` HWND. The active tab is the one whose `ShellTabWindowClass` window is
    visible (`IsWindowVisible`). Re-evaluate on `EVENT_OBJECT_SHOW`/`HIDE` for that class
    (in-window tab switch) plus NavigateComplete2. *Spike S1 must validate this.*
-5. **Fallback:** if events misbehave, poll the foreground Explorer's active folder every 250 ms
-   while it has the foreground (cheap, with no polling in the background).
+5. **Fallback:** poll the foreground Explorer's active folder every 500 ms while it has the
+   foreground, as a safety net only (S1 showed events alone are enough). There's no polling in
+   the background.
 6. Virtual folders (This PC, Home, Gallery, Recycle Bin, search results, `shell:` namespaces) have
    no file system path. The tracker emits `path = null` and the panel hides.
 7. All COM work runs on a dedicated **STA thread** with its own message loop, never on the UI
@@ -74,6 +107,34 @@ Emitted event: `ActiveFolderChanged { HWND explorerHwnd, string? path, RECT boun
 - Per-monitor DPI v2: compute in physical pixels from `GetWindowRect` + `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` so the panel sits flush with no gap from the invisible resize borders.
 - Hide the panel when: no Explorer window is in the foreground, the path is null, or the panel is
   turned off. Exception: when the panel itself has focus, keep it visible.
+
+### S2 findings (2026-10-31, Windows App SDK 2.5.1, .NET 9, 1 monitor at 125%)
+
+13/13 scripted checks passed: Explorer keeps focus, the panel isn't in Alt+Tab or the taskbar,
+it's owned by Explorer, it follows programmatic move/resize (median **14 ms**, max 34 ms,
+**0 px** edge error), maximize docks it inside, Win+Left docks it outside right, Win+Right docks
+it outside left, it hides while Explorer is minimized and re-docks on restore, it stays above its
+owner in z-order, it can be activated for inline editing, and it survives the Explorer window
+closing.
+
+Implementation requirements that came out of this:
+- **The app must ship an `app.manifest` declaring `PerMonitorV2`.** Without one, an unpackaged
+  WinUI 3 app is DPI-unaware: its `GetWindowRect`/`SetWindowPos` coordinates are virtualized
+  (1.25× off at 125%), while `DwmGetWindowAttribute` stays physical. That produced 70–337 px
+  docking errors.
+- Show with `AppWindow.Show(activateWindow: false)`, set `AppWindow.IsShownInSwitchers = false`,
+  and use `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`. Drop `WS_EX_NOACTIVATE` only while the user edits inline.
+- Use `OverlappedPresenter.SetBorderAndTitleBar(true, false)`. The panel has its own invisible
+  DWM borders (8 px each side here), so subtract the `WindowRect` − `FrameBounds` delta when positioning.
+- **Detach on owner destroy:** hook `EVENT_OBJECT_DESTROY` for the owner HWND → set
+  `GWLP_HWNDPARENT = 0` and hide. Re-own with `GWLP_HWNDPARENT` whenever the tracker reports a
+  different foreground Explorer frame.
+- The WinEvent hooks filtered by Explorer's PID (`LOCATIONCHANGE`, `MOVESIZESTART..MINIMIZEEND`,
+  `DESTROY`) run on the WinUI UI thread with no extra message loop needed.
+- Builds with the plain `dotnet build` command line (no Visual Studio), unpackaged + self-contained.
+- **Still to verify by hand** (can't be automated or tested here): smoothness during an
+  interactive drag (`spikes/S2-dock` → `S2Dock.exe watch`), mixed-DPI multi-monitor drags,
+  Windows 10.
 
 ### Panel states
 

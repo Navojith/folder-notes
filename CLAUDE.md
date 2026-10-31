@@ -42,4 +42,5 @@ Code implements the specs; the specs do not describe the code after the fact.
 - **Never modify user folders without explicit opt-in.** No `desktop.ini`, no sidecar files, no
   attribute changes unless the user turns that feature on for a folder.
 - Target: Windows 10 22H2+ and Windows 11. x64 first, ARM64 later.
-- C#: .NET 8, nullable enabled, warnings as errors. C++: C++20, `/W4 /WX`, no exceptions crossing COM boundaries.
+- C#: .NET 10 (LTS), Windows App SDK 2.x, nullable enabled, warnings as errors. Typed COM interop
+  only, never `dynamic` (ADR-007). The app ships a PerMonitorV2 `app.manifest` (S2). C++: C++20, `/W4 /WX`, no exceptions crossing COM boundaries.
