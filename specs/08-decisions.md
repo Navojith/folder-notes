@@ -60,7 +60,13 @@ packaged apps (sparse package allowed). Classic registry verbs only appear under
 `IExplorerCommand` with a sparse package in Phase 4b.
 **Consequences:** Windows 11 users get one extra click in the MVP.
 
-## ADR-006: Tooltip mechanism — *proposed (pending S3)*
+## ADR-006: Tooltip mechanism — *accepted (S3, 2026-10-31)*
+
+S3 confirmed it. A per-user `IQueryInfo` handler for `Directory` is called by Explorer on
+Windows 11 in Details, List and the icon views, and its text replaces the default tooltip. The
+`desktop.ini` fallback isn't needed for v1. Still open: E_FAIL fallback behaviour and tooltip
+caching (verified in T4.3), plus nav pane, Desktop and Tiles/Content (manual check in T4.5).
+
 
 **Decision (provisional):** An `IQueryInfo` infotip handler registered for `Directory` in HKCU.
 **Fallback if S3 fails:** an opt-in `desktop.ini` `InfoTip` mirror (REQ-073), plus an expanded

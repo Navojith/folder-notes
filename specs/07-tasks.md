@@ -26,8 +26,10 @@ Output: findings in `04-explorer-integration.md` + ADRs in `08-decisions.md`.
   maximize, snap and minimize without stealing focus, on mixed-DPI monitors.
   *Done when:* no visible lag or gap, no focus theft, and it isn't in Alt+Tab. If WinUI 3 can't
   do it cleanly, record the alternative (e.g. a Win32 host with XAML Islands) in an ADR.
-- [ ] **S3 🔬 Folder infotip handler** (REQ-040, 041): ⛔ *blocked: the MSVC C++ toolset and
-  Windows SDK aren't installed (VS 2022 Community has no "Desktop development with C++" workload).*
+- [x] **S3 🔬 Folder infotip handler** (REQ-040, 041): *done 2026-10-31. It works on Win11 in
+  Details, List and the icon views, and replaces the default tip. Explorer needs a restart after
+  registering. Open items (E_FAIL fallback, tip caching) moved into T4.3. Tiles/Content, nav pane
+  and Desktop are in the T4.5 manual check. See 04 § S3 findings, ADR-006.*
   `spikes/S3-infotip/`: a minimal C++ `IQueryInfo` handler registered in HKCU for `Directory`,
   returning static text.
   *Done when:* it's documented in which views (Details, Icons, Tiles, nav pane, desktop) the tip
@@ -114,8 +116,11 @@ search finds it.
   registration through the app (HKCU), versioned install folder.
 - [ ] **T4.2 🧱 C++ path normalizer** passing the shared vectors (REQ-063).
 - [ ] **T4.3 🧱 IQueryInfo infotip handler** (REQ-040…042), with the time budget and fail-open
-  behaviour.
-- [ ] **T4.4 🧱 Settings toggle** registers and unregisters the handler (REQ-043).
+  behaviour. **First, verify** that returning `E_FAIL` restores Explorer's default tooltip, and
+  whether an edited note shows on the next hover (if not, the app sends `SHChangeNotify(SHCNE_UPDATEITEM)`).
+- [ ] **T4.4 🧱 Settings toggle** registers and unregisters the handler (REQ-043). Explorer
+  only picks up the change after a restart (S3), so offer "Restart Explorer now" or "applies at
+  next sign-in".
 - [ ] **T4.5 ✅ Explorer stress test + Application Verifier** (NFR-01).
 - [ ] **T4.6 🧱 (4b) IExplorerCommand + sparse package** for the Windows 11 top-level menu (ADR-005).
 

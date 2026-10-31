@@ -168,7 +168,7 @@ Implementation requirements that came out of this:
   Contract docs and signed SOWs. Ask Sam before
   archiving anything here.
   ```
-  (Emoji only if spike S3 shows that the tooltip renders it correctly. Otherwise use plain text.)
+  (S3: the emoji renders as a monochrome glyph, which is acceptable.)
 - Hard rules:
   - Lookup budget: 20 ms target, 50 ms hard cap. The SQLite `busy_timeout` is 30 ms, and if the
     total runs over, return `E_FAIL` so Explorer shows its default tooltip.
@@ -181,6 +181,44 @@ Implementation requirements that came out of this:
   (`ShellExt\1.2.0\`), re-point the registry, and clean up old versions on next login.
 - **Fallback if S3 fails:** offer an opt-in "Explorer tooltip compatibility" mode that writes
   `desktop.ini` `InfoTip` (REQ-073), clearly labelled because it modifies the folder.
+
+### S3 findings (2026-10-31, Windows 11 23H2 build 22631, MSVC 14.44, Windows SDK 26100)
+
+✅ **Folder infotip handlers work on Windows 11** when registered per-user under
+`HKCU\Software\Classes\Directory\shellex\{00021500-…}`. No admin rights or approval list are needed.
+
+| View | Handler called + our tooltip shown |
+|---|---|
+| Details (column header confirmed) | ✅ (screenshot) |
+| List | ✅ |
+| Large icons / Medium icons / Small icons | ✅ (screenshots) |
+| Tiles | ⚠️ worked in 1 of 3 automated runs. In the failed runs no tooltip appeared at all (not even Explorer's default), so it's most likely a hover-automation artifact |
+| Content | ⚠️ not confirmed (same symptom as Tiles) |
+| Navigation pane, Desktop | ❓ not tested; manual check in T4.5 |
+
+What we learned:
+- **Our text replaces Explorer's default folder tooltip** (date created, size, folder contents)
+  rather than being added to it. Design consequence: for noted folders the tip should carry the
+  most useful information itself.
+- **Open question for T4.3:** does returning `E_FAIL` (no note, or over budget) fall back to
+  Explorer's default tooltip? REQ-041 assumes it does. Verify this first, before building on it.
+  If it doesn't, the handler must return a default-equivalent text itself.
+- **Explorer needs a restart to pick up a newly registered handler.** A fresh registration wasn't
+  called until `explorer.exe` restarted. That affects the install/enable UX in T4.4: offer
+  "Restart Explorer now" or say "takes effect after next sign-in". The same applies after
+  unregistering, because Explorer keeps the DLL loaded.
+- Explorer calls `IPersistFile::Load(path)` → `GetInfoTip(flags=0x8 QITIPF_USESLOWTIP)`, on
+  **different threads** of the same process. That confirms the per-thread connection cache.
+- Explorer seems to cache tips per item: hovering the same folder again in another view didn't
+  call the handler again. A note edit may therefore not show in the tooltip until the view
+  refreshes. Check this in T4.3 and, if needed, call `SHChangeNotify(SHCNE_UPDATEITEM)` for the
+  folder after saving.
+- Latency of the stub handler: in-process create + `Load` + `GetInfoTip` has a median of
+  **0.13 ms**, p99 0.45 ms. The first call takes 58 ms (DLL load, once per process). Inside
+  Explorer, `GetInfoTip` took 0.003–0.006 ms. The real budget goes into opening and querying SQLite.
+- The 📌 emoji renders as a monochrome glyph (acceptable). **C++ must be compiled with
+  `/utf-8`**: without it, `·` in the source came out as `Â·`.
+- Built with `/W4 /WX /MT`, a 154 KB DLL with no runtime dependencies.
 
 ## 4.4 Explorer restarts & robustness
 
