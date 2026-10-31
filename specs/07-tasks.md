@@ -79,7 +79,10 @@ superseded), and specs 03/04 reflect what was learned.
   Writer model: ADR-011.*
   Single-writer queue, soft delete/restore, `NoteChanged` event, backup before migration.
   *Done when:* repository tests pass, including concurrent reader + writer.
-- [ ] **T1.6 🧱 Search** (REQ-051, 052, 023). FTS5 index maintenance, query parser for filters,
+- [x] **T1.6 🧱 Search** (REQ-051, 052, 023). *Done 2026-10-31: the grammar is in 03 § Search
+  query grammar, with 50+ parser tests. The 10k-note benchmark (xunit `Category=Performance`, Debug
+  build) has a worst p95 of about 40 ms (typo fallback about 30 ms). BenchmarkDotNet is deferred to
+  T5.5. Fixing it found a full-scan conflict check in upsert, now index-backed.* FTS5 index maintenance, query parser for filters,
   ranking, and the typo fallback. *Done when:* parser tests pass and the benchmark is <100 ms at 10k notes.
 - [ ] **T1.7 🧱 Export / import JSON** (REQ-070). *Done when:* a round-trip test is lossless.
 

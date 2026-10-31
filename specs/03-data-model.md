@@ -157,6 +157,34 @@ junction table). Ranking is `bm25(notes_fts, 10, 1, 5, 2)`
 (title > labels > path > body). Typo tolerance: if FTS returns fewer than 5 hits, fall back to a
 trigram/Levenshtein pass over titles and labels in memory (fine up to 10k notes).
 
+### Search query grammar (T1.6, REQ-051/052/023)
+
+The query is split on whitespace, and `"…"` groups words (also inside a filter value:
+`label:"do not touch"`). Filter keys ignore case. Every filter and term must match (AND).
+
+| Token | Meaning |
+|---|---|
+| `word` | Prefix match in title, body, labels or path (FTS5 `"word"*`) |
+| `"two words"` | Phrase, with a prefix match on the last word |
+| `label:<name>` | Has that label (name ignores case). Repeat it to require several labels. |
+| `status:<key>` | One of `none, keep, safe-to-delete, archive, in-progress, review`. Repeating it means *any of* them. |
+| `path:<folder>` | The note's folder is that folder or inside it. The value is normalized (03 § String normalization). Repeating it means any of them. |
+| `due:overdue` | Due date (earliest of *review on* / *safe after*) is before today |
+| `due:<n>d` / `<n>w` / `<n>m` / `<n>y` | Due from today through today + n days / weeks / months / years |
+| `due:<op><period>`, `keep:<op><period>` | Compare the due date or *keep until* with a period `yyyy`, `yyyy-mm` or `yyyy-mm-dd`. `op` is `<`, `<=`, `>`, `>=`, or nothing (inside the period). `keep:<2027` means before 2027-01-01. `keep:>2027` means after 2027-12-31. `keep:<n>d` (relative ranges) also works. |
+
+A `key:value` with an unknown key is plain text (so `C:\Temp` still searches). A known key with a
+bad value (`status:bogus`, `due:soon`) is ignored and reported back as a parse error, which the
+palette shows under the box. "Today" is the local calendar date.
+
+**Ranking:** FTS hits come first, ordered by `bm25`, with ties broken by `updated_at` (newest
+first). With no text terms, the filters alone list notes newest first. **Typo fallback:** if
+there are fewer than 5 FTS hits, every term with at least 4 characters may match a title word or
+label name in memory within Damerau-Levenshtein distance 1 (4–7 characters) or 2 (8 or more).
+Comparison ignores case and diacritics. A term shorter than 4 characters must prefix-match. A phrase's words must match consecutive words. Fuzzy
+hits are appended after the FTS hits, ordered by total distance. The candidate cache is rebuilt
+after any `NoteChanged` / `LabelsChanged`.
+
 ## Storage conventions (T1.5)
 
 | Value | Stored as |

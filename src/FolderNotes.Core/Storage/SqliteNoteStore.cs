@@ -513,10 +513,11 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
     /// <summary>The id of another live note bound to the same path or file ID, if any (REQ-001).</summary>
     private static Guid? FindConflict(WriteContext ctx, Guid selfId, FolderRef folder)
     {
+        // Two arms so each one can use its partial unique index (an OR here forced a full scan).
         using var cmd = ctx.Command("""
-            SELECT id FROM notes
-            WHERE deleted_at IS NULL AND id <> $self
-              AND (path_norm = $pn OR ($fi IS NOT NULL AND volume_serial = $vs AND file_id = $fi))
+            SELECT id FROM notes WHERE path_norm = $pn AND deleted_at IS NULL AND id <> $self
+            UNION ALL
+            SELECT id FROM notes WHERE volume_serial = $vs AND file_id = $fi AND deleted_at IS NULL AND file_id IS NOT NULL AND id <> $self
             LIMIT 1
             """);
         BindFolder(cmd, folder);
@@ -615,6 +616,10 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         var labels = query.Labels.Count > 0 ? LoadLabels(c, null) : [];
         return LoadNotes(c, null, NoteFilterSql.Where(query, labels, out var bind), bind, NoteFilterSql.OrderBy(query.Sort), query.Limit, query.Offset);
     }
+
+    /// <summary>Loads live notes by id on an open read connection (search hits).</summary>
+    internal static Dictionary<Guid, Note> QueryNotesForSearch(SqliteConnection c, IReadOnlyList<Guid> ids) =>
+        QueryNotes(c, new NoteQuery { Ids = ids, State = NoteListState.Active }).ToDictionary(n => n.Id);
 
     internal static List<Note> LoadNotes(
         SqliteConnection c, SqliteTransaction? tx, string where, Action<SqliteCommand> bind,
