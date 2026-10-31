@@ -20,6 +20,9 @@ Code implements the specs; the specs do not describe the code after the fact.
    short ADR (context → decision → consequences). Don't silently reverse an ADR; supersede it.
 6. **Spikes produce knowledge, not product code.** Spike tasks (Phase 0) end with findings written
    into the relevant spec plus an ADR. Spike code lives in `spikes/` and is never shipped.
+7. **Track progress.** At the end of every task or session, update `specs/09-progress.md`: task
+   row (status, date, commit), phase counts, measurements, open items, blockers, and a log entry.
+   Start each session by reading it to see where things stand.
 
 ## Spec index
 
@@ -34,6 +37,7 @@ Code implements the specs; the specs do not describe the code after the fact.
 | `specs/06-testing.md` | Test strategy, what must be tested and how |
 | `specs/07-tasks.md` | Phased implementation plan (the backlog) |
 | `specs/08-decisions.md` | Architecture decision records |
+| `specs/09-progress.md` | **Where we are:** phase/task status, measurements, open items, blockers, log |
 
 ## Engineering rules
 
