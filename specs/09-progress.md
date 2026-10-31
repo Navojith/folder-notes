@@ -36,7 +36,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T1.4 FolderIdentity service | ✅ | 2026-10-31 | `a015c2d` | 18 real-folder tests; IDs only on NTFS/ReFS; Recycle Bin detected |
 | T1.5 SQLite schema + repository | ✅ | 2026-10-31 | `89202d6` | ADR-009 lookup + OrphanScanner; ADR-010 (FTS content), ADR-011 (writer) |
 | T1.6 Search | ✅ | 2026-10-31 | `c0b2edf` | Grammar in 03; 10k benchmark p95 ≤54 ms |
-| T1.7 Export / import JSON | ✅ | 2026-10-31 | (this commit) | Lossless + byte-identical re-export |
+| T1.7 Export / import JSON | ✅ | 2026-10-31 | `eb44b8e` | Lossless + byte-identical re-export |
 | T2.1 WinUI 3 app skeleton | ⚪ next | | | Also adds App.Tests (deferred from T1.1) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
