@@ -4,7 +4,7 @@ Pin notes to Windows folders ("client files, don't delete until 2027", "build ou
 A side panel shows the note whenever the folder is open in File Explorer, hovering a folder shows
 a tooltip, and you can search every note.
 
-> **Status:** Phase 1 (core library). Not usable yet. See [`specs/07-tasks.md`](specs/07-tasks.md).
+> **Status:** Phase 2 (app shell). Not usable yet. See [`specs/07-tasks.md`](specs/07-tasks.md).
 
 This project is **spec-driven**: read [`CLAUDE.md`](CLAUDE.md) and [`specs/`](specs/) before changing anything.
 
@@ -26,11 +26,16 @@ dotnet test --solution FolderNotes.slnx -c Release
 eng\build-shellext.cmd Release x64      # -> artifacts\shellext\x64-Release\FolderNotes.ShellExt.dll
 ```
 
-Run the app (scaffold only for now):
+Run the app (tray icon + an empty main window for now; logs go to `%LOCALAPPDATA%\FolderNotes\logs`):
 
 ```powershell
-src\FolderNotes.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\FolderNotes.exe
+$exe = "src\FolderNotes.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\FolderNotes.exe"
+& $exe                      # tray icon + main window
+& $exe --background         # tray only (what the login entry will use)
+& $exe --edit "C:\Temp\x"   # forwarded to the running instance
 ```
+
+Only one instance runs. Quit it from the tray icon's menu.
 
 ## Layout
 
@@ -43,5 +48,6 @@ src/
   FolderNotes.ShellExt/  C++ in-proc shell extension (CMake)
 tests/
   FolderNotes.Core.Tests/
+  FolderNotes.App.Tests/   activation parsing/routing, UI-thread event relay
 eng/        build scripts
 ```

@@ -8,9 +8,16 @@
     <MicaBackdrop />
   </Window.SystemBackdrop>
   <Grid Padding="32">
-    <StackPanel Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+    <StackPanel Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
       <TextBlock Text="Folder Notes" Style="{StaticResource TitleTextBlockStyle}" />
-      <TextBlock Text="Scaffold. The real UI arrives in Phase 2." Style="{StaticResource BodyTextBlockStyle}" />
+      <TextBlock Text="App shell (T2.1). The library, editor and search arrive in the next tasks."
+                 Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+      <!-- Last routed command; lets manual checks and FlaUI see that forwarding worked. -->
+      <TextBlock x:Name="RequestText" AutomationProperties.AutomationId="LastRequest"
+                 AutomationProperties.Name="Last request" Visibility="Collapsed"
+                 Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+      <InfoBar x:Name="ErrorBar" AutomationProperties.AutomationId="StartupError" Severity="Error"
+               Title="Something went wrong" IsClosable="False" IsOpen="False" />
     </StackPanel>
   </Grid>
 </Window>

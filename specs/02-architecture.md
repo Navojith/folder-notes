@@ -102,6 +102,56 @@ folder-notes/
 | `--background` | Start silently to tray (used at login) |
 | toast activation `action=openFolder&id=…` | From REQ-021 |
 
+Resolved in T2.1:
+
+- **No args, first launch:** the tray icon appears **and** the main window opens (someone who
+  starts the app from the Start menu expects a window). Only `--background` starts with no window.
+  No args when already running: bring the main window forward.
+- **Parsing** (`ActivationParser`, pure, unit-tested): the command line is split with Windows
+  rules (`CommandLineToArgvW`). The first token is dropped when it is the executable path (the
+  forwarded `Arguments` string of an unpackaged app includes it). Switches are case-insensitive
+  and also accept a `/` prefix (`/edit`). The first token must be a switch, and only that one
+  counts: tokens after its value are ignored.
+  - `--edit` needs a non-empty path; a missing path is `Invalid`. A path ending in `"` (after
+    trimming trailing spaces) gets that quote replaced by `\`: Explorer's `"%V"` for a drive root
+    is `"D:\"`, which Windows splits as `D:"`, and the forwarded string adds a trailing space.
+    Windows paths can't contain `"` or end in a space, so the repair is always safe.
+  - `--search` takes every remaining token, joined by single spaces, as the query (may be empty).
+  - `--open-note` needs a GUID (any `Guid.TryParse` form); otherwise `Invalid`.
+  - Unknown switches and stray tokens give `Invalid` with a reason. The router logs a warning
+    and treats `Invalid` as *no args* (show the main window), so a bad shortcut never looks like
+    a dead app.
+- **Redirection:** a second process calls `AppInstance.RedirectActivationToAsync` and exits. The
+  main instance gets `AppInstance.Activated` on a background thread, marshals it to the UI
+  thread, and runs it through the same parser and `CommandRouter` as its own startup args.
+- **Until the target screen exists**, a command opens the main window (T2.3 adds the editor,
+  T2.6 the search palette) and the command is logged.
+
+## App shell (T2.1)
+
+- **Entry point:** a custom `Program.Main` (`DISABLE_XAML_GENERATED_MAIN`) does the
+  single-instance check *before* any XAML is created, so a redirected second launch costs
+  almost nothing.
+- **Lifetime:** `DispatcherShutdownMode.OnExplicitShutdown`. Closing the main window **destroys**
+  it (it is recreated on demand) and the process stays in the tray, which keeps idle memory low
+  (REQ-080). Only **Quit** in the tray menu ends the process: it removes the tray icon, flushes
+  the log and disposes the store (which drains the writer queue).
+- **Tray icon:** `Shell_NotifyIcon` on a hidden top-level Win32 window owned by the UI thread
+  (ADR-012). Left-click → search; right-click → the menu in 05 § Tray. "Panel on/off" is shown
+  disabled until Phase 3. The icon is re-added when `TaskbarCreated` arrives (Explorer restart).
+- **Composition:** `Microsoft.Extensions.DependencyInjection`. Singletons: `ILogger` (Serilog),
+  `IFolderIdentityService`, `SqliteNoteStore` (as `INoteRepository` and `ILabelRepository`),
+  `ISearchService`, `IUiDispatcher`, `UiNoteEvents`, `CommandRouter`, `TrayIcon`. The store is
+  opened once at startup at `%LOCALAPPDATA%\FolderNotes\notes.db`.
+- **UI-thread marshalling (O-11, ADR-011):** UI code never subscribes to the store's events
+  directly. `UiNoteEvents` subscribes once and re-raises `NoteChanged` / `LabelsChanged` through
+  `IUiDispatcher` (a wrapper over `DispatcherQueue.TryEnqueue`), so handlers always run on the
+  UI thread and never delay the writer task.
+- **Logging:** Serilog file sink at `%LOCALAPPDATA%\FolderNotes\logs\app-<date>.log`, rolling
+  daily, 7 files kept, minimum level Information (Debug in Debug builds). Unhandled exceptions
+  (XAML `UnhandledException`, `AppDomain`, `TaskScheduler.UnobservedTaskException`) are logged
+  as Fatal/Error before anything else happens.
+
 ## Key interfaces (FolderNotes.Core)
 
 ```csharp

@@ -15,9 +15,23 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <!-- S2: without PerMonitorV2 the panel docks 1.25x off at 125% scaling. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\FolderNotes.ico</ApplicationIcon>
+    <!-- T2.1: Program.Main does the single-instance check before any XAML exists (specs/02 § App shell). -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- Tray icon P/Invoke uses fixed buffers and function pointers (ADR-012). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Assets\FolderNotes.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="FolderNotes.App.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\FolderNotes.Core\FolderNotes.Core.csproj" />

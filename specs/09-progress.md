@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.1 WinUI 3 app skeleton
+**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.2 Theme + design tokens
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 Next | 0 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 1 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -37,7 +37,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T1.5 SQLite schema + repository | ✅ | 2026-10-31 | `89202d6` | ADR-009 lookup + OrphanScanner; ADR-010 (FTS content), ADR-011 (writer) |
 | T1.6 Search | ✅ | 2026-10-31 | `c0b2edf` | Grammar in 03; 10k benchmark p95 ≤54 ms |
 | T1.7 Export / import JSON | ✅ | 2026-10-31 | `eb44b8e` | Lossless + byte-identical re-export |
-| T2.1 WinUI 3 app skeleton | ⚪ next | | | Also adds App.Tests (deferred from T1.1) |
+| T2.1 WinUI 3 app skeleton | ✅ | 2026-10-31 | _pending_ | App.Tests (47); ADR-012 tray; O-11 closed by `UiNoteEvents` |
+| T2.2 Theme + design tokens | ⚪ next | | | Also replace the placeholder icon (`Assets/FolderNotes.ico`) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -54,7 +55,9 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | Upsert at 10k notes | (no target) | 10k upserts in one transaction ≈ 4 s (≈0.4 ms each) | T1.6 | ✅ |
 | REQ-060 `Resolve` cost | <5 ms (test bound) | passes; S4 measured 0.01 ms for the ID read | T1.4 | ✅ |
 | Phase 1 exit: Core coverage | ≥85% | 93.0% line / 86.6% branch (362 tests) | Phase 1 | ✅ |
-| NFR-02 cold start | <1.5 s | — | T5.5 | ⚪ |
+| REQ-080 idle RAM (private working set) | <60 MB | 31.7 MB tray-only; 54.2 MB after the main window was opened and closed (private bytes 46.8 / 70.7 MB), Release | T2.1 | ✅ |
+| Redirected second launch | (no target) | process exits ≈120 ms after start | T2.1 | ✅ |
+| NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
 ## Open items to verify
 
@@ -71,7 +74,9 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-7 | Folder identity on exFAT/FAT32, ReFS, network shares, OneDrive Files-On-Demand, cross-volume moves | 03 § S4 | manual, before T6.3 | open: code is defensive (IDs only on NTFS/ReFS, path fallback elsewhere) but there's no hardware to test on |
 | O-9 | Path sort is ordinal on `path_norm`, so `D:\ClientsOld` sorts before `D:\Clients\Acme`. Should the library sort hierarchically? | 03 / REQ-054 | T2.4 | open |
 | O-10 | Run BenchmarkDotNet on Release (06 § Performance); T1.6 used an xunit timing test instead | 06 | T5.5 | open |
-| O-11 | `NoteChanged` handlers run on the writer task (ADR-011); the app must marshal them to the UI thread | 02 / ADR-011 | T2.1 | open |
+| O-11 | `NoteChanged` handlers run on the writer task (ADR-011); the app must marshal them to the UI thread | 02 / ADR-011 | T2.1 | **closed** 2026-10-31: `UiNoteEvents` relays via `IUiDispatcher`; UI code subscribes there (02 § App shell) |
+| O-12 | Tray icon comes back after an Explorer restart (`TaskbarCreated`), and has the right size at 150% / mixed DPI | 02 § App shell / ADR-012 | T3.5 manual | open: code path written, not exercised (didn't restart the user's Explorer) |
+| O-13 | Memory after the window closes stays ~23 MB above tray-only (XAML stays loaded). Under target now; recheck once real pages exist | REQ-080 | T5.5 | open |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
 ## Blockers
@@ -97,6 +102,20 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-10-31 (T2.1)
+- **T2.1 done:** custom `Program.Main` with `AppInstance` single-instance redirection,
+  `ActivationParser` + `CommandRouter`, `AppShell` (main window created on demand, destroyed on
+  close, `OnExplicitShutdown`), `TrayIcon` via `Shell_NotifyIcon` (ADR-012), MS DI, Serilog
+  rolling file logs, `UiNoteEvents` (O-11), a placeholder icon. New `FolderNotes.App.Tests`
+  (47 tests); 409/409 green in Release.
+- **Spec changes made first:** 02 gained "Resolved in T2.1" (no args shows the window, parsing
+  rules) and § App shell; ADR-012; REQ-080 now says which RAM metric counts.
+- **Learned:** drive roots break naive quoting: `--edit "D:\"` arrives as `D:"`, and the string
+  `AppInstance` forwards also ends in a space. The parser repairs both (found only by running it
+  for real). A test project that references the WinUI exe needs the WinAppSDK auto-initializers
+  turned off, or the generated types collide through `InternalsVisibleTo`.
+- **Next:** T2.2 theme + design tokens (and the real icon).
 
 ### 2026-10-31 (Phase 1)
 - **Phase 1 complete:** T1.2–T1.7 done, one commit per task. Core has the domain model and

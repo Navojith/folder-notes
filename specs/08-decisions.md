@@ -122,3 +122,18 @@ a `TaskCompletionSource`. Reads open pooled `Mode=ReadOnly` connections and rely
 **Consequences:** There's no `SQLITE_BUSY` between our own writers, and writes are applied in
 order. Event handlers run on the writer task, so UI subscribers must marshal to their dispatcher,
 and a slow handler delays the next write.
+
+## ADR-012: Tray icon via `Shell_NotifyIcon` on our own hidden window — *accepted (T2.1, 2026-10-31)*
+
+**Context:** WinUI 3 has no tray icon API. REQ-080 makes the app a tray process that must stay
+under 60 MB idle, and it has to survive Explorer restarts.
+**Options:** a third-party package (H.NotifyIcon, WinUIEx); WinForms `NotifyIcon`; our own
+`Shell_NotifyIcon` call via `LibraryImport`.
+**Decision:** our own small `TrayIcon` class: a hidden **top-level** window (not message-only,
+because message-only windows don't receive the broadcast `TaskbarCreated` message) created on the
+UI thread, whose window proc handles the callback message, shows a `TrackPopupMenu` menu and
+re-adds the icon on `TaskbarCreated`. P/Invoke is source-generated (`LibraryImport`), typed, and
+uses no `dynamic` (ADR-007).
+**Consequences:** About 300 lines we own, no extra dependency, and no WinForms runtime loaded
+(which would cost memory). The menu is a classic Win32 menu, not Fluent; that matches what the
+Windows shell does for tray menus and is acceptable for v1.

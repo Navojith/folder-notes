@@ -7,6 +7,9 @@
     <Project Path="src/FolderNotes.Core/FolderNotes.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FolderNotes.App.Tests/FolderNotes.App.Tests.csproj">
+      <Platform Solution="*|Any CPU" Project="x64" />
+    </Project>
     <Project Path="tests/FolderNotes.Core.Tests/FolderNotes.Core.Tests.csproj" />
   </Folder>
 </Solution>

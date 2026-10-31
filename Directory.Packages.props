@@ -6,6 +6,9 @@
   <ItemGroup>
     <!-- App -->
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+    <PackageVersion Include="Serilog" Version="4.4.0" />
+    <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
     <!-- Core -->
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <!-- Tests -->

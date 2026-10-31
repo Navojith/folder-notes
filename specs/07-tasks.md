@@ -96,8 +96,16 @@ superseded), and specs 03/04 reflect what was learned.
 
 ## Phase 2: App shell + editor + search (usable without Explorer integration)
 
-- [ ] **T2.1 🧱 WinUI 3 app skeleton.** Single instance, activation-args router (`--edit`,
+- [x] **T2.1 🧱 WinUI 3 app skeleton.** Single instance, activation-args router (`--edit`,
   `--search`, `--open-note`, `--background`), tray icon, DI container, Serilog. (REQ-080)
+  *Done 2026-10-31: custom `Program.Main` + `AppInstance` redirection, `ActivationParser` /
+  `CommandRouter`, `TrayIcon` on our own window (ADR-012), MS DI + Serilog, `UiNoteEvents`
+  (closes O-11). App.Tests added (47 tests). Verified live: a second launch forwards and exits in
+  ~120 ms, tray click → search, menu → Quit, idle private working set 31.7 MB tray-only and
+  54.2 MB after the window was used (REQ-080 <60 MB). Commands open the main window until
+  T2.3/T2.6 add their screens.*
+  *Done when:* parser, router and UI-marshalling tests pass; a second launch with `--edit`
+  reaches the running instance; the tray menu works; idle memory is under the REQ-080 target.
 - [ ] **T2.2 🧱 Theme + design tokens.** Label palette resources, status icons, Mica, light/dark,
   high contrast. (REQ-082)
 - [ ] **T2.3 🧱 Note editor page + compact editor window** (REQ-002…007, 011, 020). Autosave

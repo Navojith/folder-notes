@@ -128,7 +128,7 @@ hides the badge (REQ-022).
 
 | ID | Pri | Requirement |
 |---|---|---|
-| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and uses under 60 MB RAM while idle. |
+| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and uses under 60 MB RAM while idle. *RAM = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction, both tray-only and after the main window was opened and closed.* |
 | REQ-081 | M | Settings: panel on/off/position/width, hide-when-empty, tooltip on/off, hotkey, start with Windows, theme (system/light/dark), reminder time of day. |
 | REQ-082 | M | The UI shall follow the system theme and accent color and use Mica/Acrylic backdrops where available. |
 | REQ-083 | M | All UI shall be keyboard-navigable and screen-reader labelled (UIA names), with WCAG AA contrast. |
