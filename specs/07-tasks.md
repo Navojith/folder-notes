@@ -58,8 +58,9 @@ superseded), and specs 03/04 reflect what was learned.
   Original scope: `FolderNotes.sln` with Core, App, ShellExt (empty), and test
   projects. `Directory.Build.props` (nullable, warnings as errors), `.editorconfig`, and a
   `README.md` with build steps. *Done when:* `dotnet build` and `dotnet test` pass in CI (GitHub Actions, `windows-latest`).
-- [ ] **T1.2 🧱 Domain model + validation** (REQ-001, 002, 010, 020). `Note`, `Label`,
-  `NoteStatus`, `FolderRef`, validation rules. *Done when:* unit tests cover every rule in REQ-002.
+- [x] **T1.2 🧱 Domain model + validation** (REQ-001, 002, 010, 020). *Done 2026-10-31: the
+  rules got stable codes in 01 § Validation rules; lengths count Unicode characters, matching
+  SQLite `length()`.* `Note`, `Label`, `NoteStatus`, `FolderRef`, validation rules. *Done when:* unit tests cover every rule in REQ-002.
 - [ ] **T1.3 🧱 Path normalization + shared vectors** (REQ-063). *Done when:* there are 40 or more
   vectors (drive letters, UNC, mapped drives, `\\?\`, trailing slash, casing, long paths, Unicode)
   and all of them pass.

@@ -29,6 +29,29 @@ Priority: **M** = must (v1), **S** = should (v1 if time), **C** = could (later).
 - If the app is killed during editing, the note reopens with all text typed more than 500 ms before the kill.
 - After a delete, clicking Undo restores the note with identical content and ID.
 
+**Validation rules (REQ-002, REQ-010).** A note that breaks any rule can't be saved. Each rule has
+a stable code that the UI maps to an inline error. "Characters" means Unicode characters (scalar
+values), which is what SQLite's `length()` counts, so an emoji counts as 1.
+
+| Code | Rule |
+|---|---|
+| `title.required` | Title isn't empty or whitespace only. |
+| `title.too-long` | Title is at most 120 characters. |
+| `title.single-line` | Title has no line breaks or other control characters. |
+| `body.too-long` | Body is at most 50,000 characters. |
+| `status.invalid` | Status is one of the six defined values. |
+| `accent.invalid` | Accent color is empty or one of the 12 palette keys. |
+| `labels.duplicate` | No two labels on a note have the same name, ignoring case. |
+| `label.name-required` | A label name isn't empty or whitespace only. |
+| `label.name-too-long` | A label name is at most 40 characters. |
+| `label.name-invalid` | A label name has no control characters or leading/trailing spaces, and no `"`. |
+| `label.color-invalid` | A label color is one of the 12 palette keys. |
+| `folder.required` | The note has a folder path. |
+| `timestamps.order` | `updated_at` isn't earlier than `created_at`. |
+
+Dates (REQ-020) aren't cross-validated: any combination is allowed, and a past *keep until* just
+hides the badge (REQ-022).
+
 ## B. Labels
 
 | ID | Pri | Requirement |
