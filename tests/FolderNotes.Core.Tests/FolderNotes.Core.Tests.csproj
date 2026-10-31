@@ -16,6 +16,10 @@
     <ProjectReference Include="..\..\src\FolderNotes.Core\FolderNotes.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Shared with the C++ suite (specs/06-testing.md). -->
+    <None Include="..\shared\**\*" Link="shared\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="Shouldly" />
   </ItemGroup>

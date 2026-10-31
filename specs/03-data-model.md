@@ -22,6 +22,31 @@ path. This resolves `subst` drives, 8.3 short names, `\\?\` prefixes and casing 
 (it costs about 0.01–0.04 ms). The string normalizer (shared vectors) is only the fallback for
 paths that can't be opened.
 
+**String normalization rules (T1.3, REQ-063).** `PathNormalizer.Normalize` (C#) and its C++ twin
+(T4.2) turn any spelling into `path_norm`. Both must pass every vector in
+`tests/shared/path-normalization-vectors.json`. In order:
+1. Trim whitespace, strip one pair of surrounding `"`, and trim again. If the result is empty, it's invalid.
+2. Change `/` to `\`.
+3. Prefixes: `\\?\UNC\x` and `\\.\UNC\x` become `\\x`. `\\?\C:…` and `\\.\C:…` become `C:…`. Any
+   other `\\?\` / `\\.\` path (e.g. `\\?\Volume{guid}\…`) keeps its prefix and first segment as the
+   root. A `\\?\` path is **literal**, so rule 6 doesn't apply to it (Win32 doesn't apply it either).
+4. Root: `X:` followed by the end or `\` gives the drive root `X:` (upper-case letter). If the
+   letter is a **mapped network drive**, the root is replaced by its UNC target (resolved with
+   `WNetGetConnection` in the app; tests inject a fixed map from the vectors file). `\\server\share`
+   gives a UNC root, and both parts are required. Anything else is **invalid**: relative paths,
+   drive-relative `C:foo`, and rooted-without-drive `\foo`.
+5. Split the rest on `\` and drop empty segments, so `\\` collapses.
+6. (Not literal paths) Strip trailing dots and spaces from each segment and drop segments that
+   become empty. Resolve `.` and `..`, where `..` at the root stays at the root.
+7. Join as `root\seg\seg`. There's never a trailing `\`, so a drive root is `C:` and a share root is
+   `\\SERVER\SHARE`.
+8. `path_norm` is upper-cased with invariant simple case mapping (`ToUpperInvariant`, and in C++
+   `LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_UPPERCASE)`). `path_display` uses the same steps
+   without upper-casing (only the drive letter is upper-cased).
+
+A path is "under" a folder (for `path:` filters and inherited context) if its `path_norm` equals
+the folder's or starts with the folder's `path_norm + "\"`.
+
 **Lookup algorithm** `GetByFolder(path)`, revised after S4:
 1. Read `(volume_serial, file_id)` for the folder. If a note has that pair, **return it** (and,
    in the app only, update `path_norm`/`path_display` if they differ: the folder was renamed or moved).

@@ -61,7 +61,9 @@ superseded), and specs 03/04 reflect what was learned.
 - [x] **T1.2 🧱 Domain model + validation** (REQ-001, 002, 010, 020). *Done 2026-10-31: the
   rules got stable codes in 01 § Validation rules; lengths count Unicode characters, matching
   SQLite `length()`.* `Note`, `Label`, `NoteStatus`, `FolderRef`, validation rules. *Done when:* unit tests cover every rule in REQ-002.
-- [ ] **T1.3 🧱 Path normalization + shared vectors** (REQ-063). *Done when:* there are 40 or more
+- [x] **T1.3 🧱 Path normalization + shared vectors** (REQ-063). *Done 2026-10-31: 57 vectors
+  in `tests/shared/path-normalization-vectors.json`, all passing. The rules are in 03 § String
+  normalization rules. Mapped drives are injected from the vector file.* *Done when:* there are 40 or more
   vectors (drive letters, UNC, mapped drives, `\\?\`, trailing slash, casing, long paths, Unicode)
   and all of them pass.
 - [ ] **T1.4 🧱 FolderIdentity service** (REQ-060, 061, 062), from S4's findings. *Done when:*

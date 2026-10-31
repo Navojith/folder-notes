@@ -1,0 +1,352 @@
+{
+  "schema": "foldernotes-path-vectors/1",
+  "description": "input -> expected path_norm (null = invalid). Rules: specs/03-data-model.md, String normalization rules. Checked by the C# and C++ normalizers.",
+  "mappedDrives": {
+    "Z": "\\\\nas\\media",
+    "Y": "\\\\Server.Lan\\Share Name\\sub"
+  },
+  "vectors": [
+    {
+      "category": "drive",
+      "input": "C:\\Clients\\Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "basic"
+    },
+    {
+      "category": "drive",
+      "input": "c:\\clients\\acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "lower-case drive letter and path"
+    },
+    {
+      "category": "drive",
+      "input": "C:\\",
+      "expected": "C:",
+      "note": "drive root has no trailing backslash"
+    },
+    {
+      "category": "drive",
+      "input": "c:",
+      "expected": "C:",
+      "note": "bare drive is its root"
+    },
+    {
+      "category": "drive",
+      "input": "D:\\Projects\\Build Output",
+      "expected": "D:\\PROJECTS\\BUILD OUTPUT",
+      "note": "inner space kept"
+    },
+    {
+      "category": "drive",
+      "input": "C:foo",
+      "expected": null,
+      "note": "drive-relative is invalid"
+    },
+    {
+      "category": "trailing",
+      "input": "C:\\Clients\\Acme\\",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "trailing backslash"
+    },
+    {
+      "category": "trailing",
+      "input": "C:\\Clients\\Acme\\\\\\",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "several trailing backslashes"
+    },
+    {
+      "category": "trailing",
+      "input": "C:\\Clients\\Acme.",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "Win32 strips a trailing dot"
+    },
+    {
+      "category": "trailing",
+      "input": "C:\\Clients\\Acme  ",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "trailing spaces are trimmed"
+    },
+    {
+      "category": "trailing",
+      "input": "C:\\Clients\\Acme. .\\Docs",
+      "expected": "C:\\CLIENTS\\ACME\\DOCS",
+      "note": "trailing dots/spaces per segment"
+    },
+    {
+      "category": "separators",
+      "input": "C:/Clients/Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "forward slashes"
+    },
+    {
+      "category": "separators",
+      "input": "C:\\Clients\\\\Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "doubled backslash collapses"
+    },
+    {
+      "category": "separators",
+      "input": "C:/Clients\\/Acme/",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "mixed separators"
+    },
+    {
+      "category": "dots",
+      "input": "C:\\Clients\\.\\Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "dot segment"
+    },
+    {
+      "category": "dots",
+      "input": "C:\\Clients\\Old\\..\\Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "dot-dot segment"
+    },
+    {
+      "category": "dots",
+      "input": "C:\\..\\..\\Acme",
+      "expected": "C:\\ACME",
+      "note": "dot-dot clamps at the root"
+    },
+    {
+      "category": "dots",
+      "input": "C:\\.hidden",
+      "expected": "C:\\.HIDDEN",
+      "note": "leading dot is part of the name"
+    },
+    {
+      "category": "quotes",
+      "input": "\"C:\\Clients\\Acme\"",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "surrounding quotes from command line"
+    },
+    {
+      "category": "quotes",
+      "input": "  \"C:\\Clients\\Acme\\\" ",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "quotes, spaces and trailing slash"
+    },
+    {
+      "category": "whitespace",
+      "input": "  C:\\Clients  ",
+      "expected": "C:\\CLIENTS",
+      "note": "surrounding whitespace"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\C:\\Clients\\Acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "long-path prefix stripped"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\c:\\Clients\\Acme\\",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "long-path prefix + trailing slash"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\.\\C:\\Clients",
+      "expected": "C:\\CLIENTS",
+      "note": "device prefix stripped"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\C:\\Clients\\Acme.",
+      "expected": "C:\\CLIENTS\\ACME.",
+      "note": "literal path keeps trailing dot"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\C:\\a\\..\\b",
+      "expected": "C:\\A\\..\\B",
+      "note": "literal path keeps dot-dot"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\UNC\\server\\share\\Docs",
+      "expected": "\\\\SERVER\\SHARE\\DOCS",
+      "note": "long UNC prefix"
+    },
+    {
+      "category": "prefix",
+      "input": "\\\\?\\Volume{3f2504e0-4f89-11d3-9a0c-0305e82c3301}\\Data",
+      "expected": "\\\\?\\VOLUME{3F2504E0-4F89-11D3-9A0C-0305E82C3301}\\DATA",
+      "note": "volume GUID path keeps its prefix"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\server\\share\\Docs",
+      "expected": "\\\\SERVER\\SHARE\\DOCS",
+      "note": "basic UNC"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\server\\share\\",
+      "expected": "\\\\SERVER\\SHARE",
+      "note": "share root"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\server\\share",
+      "expected": "\\\\SERVER\\SHARE",
+      "note": "share root without slash"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\Server.Lan\\Share Name\\Sub Dir\\",
+      "expected": "\\\\SERVER.LAN\\SHARE NAME\\SUB DIR",
+      "note": "dotted host, spaces"
+    },
+    {
+      "category": "unc",
+      "input": "//server/share/docs",
+      "expected": "\\\\SERVER\\SHARE\\DOCS",
+      "note": "forward-slash UNC"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\server",
+      "expected": null,
+      "note": "server without share is invalid"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\server\\",
+      "expected": null,
+      "note": "server with empty share is invalid"
+    },
+    {
+      "category": "unc",
+      "input": "\\\\192.168.1.10\\backup\\2026",
+      "expected": "\\\\192.168.1.10\\BACKUP\\2026",
+      "note": "IP host"
+    },
+    {
+      "category": "mapped",
+      "input": "Z:\\Movies",
+      "expected": "\\\\NAS\\MEDIA\\MOVIES",
+      "note": "mapped drive resolves to UNC"
+    },
+    {
+      "category": "mapped",
+      "input": "z:\\",
+      "expected": "\\\\NAS\\MEDIA",
+      "note": "mapped drive root"
+    },
+    {
+      "category": "mapped",
+      "input": "Y:\\Reports",
+      "expected": "\\\\SERVER.LAN\\SHARE NAME\\SUB\\REPORTS",
+      "note": "mapped drive with sub-path target"
+    },
+    {
+      "category": "mapped",
+      "input": "Z:\\Movies\\..\\Music",
+      "expected": "\\\\NAS\\MEDIA\\MUSIC",
+      "note": "dot-dot after mapping"
+    },
+    {
+      "category": "casing",
+      "input": "C:\\CLIENTS\\acme",
+      "expected": "C:\\CLIENTS\\ACME",
+      "note": "mixed case"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Données\\Été",
+      "expected": "C:\\DONNÉES\\ÉTÉ",
+      "note": "Latin accents"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Ärzte\\Öl\\über",
+      "expected": "C:\\ÄRZTE\\ÖL\\ÜBER",
+      "note": "German umlauts"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Straße",
+      "expected": "C:\\STRAßE",
+      "note": "sharp s has no simple upper-case"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Документы\\Отчёт",
+      "expected": "C:\\ДОКУМЕНТЫ\\ОТЧЁТ",
+      "note": "Cyrillic"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Έγγραφα",
+      "expected": "C:\\ΈΓΓΡΑΦΑ",
+      "note": "Greek"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\文档\\照片",
+      "expected": "C:\\文档\\照片",
+      "note": "CJK has no case"
+    },
+    {
+      "category": "unicode",
+      "input": "C:\\Photos 📷\\2026",
+      "expected": "C:\\PHOTOS 📷\\2026",
+      "note": "emoji (surrogate pair) kept"
+    },
+    {
+      "category": "long",
+      "input": "C:\\Segment00-long-folder-name\\Segment01-long-folder-name\\Segment02-long-folder-name\\Segment03-long-folder-name\\Segment04-long-folder-name\\Segment05-long-folder-name\\Segment06-long-folder-name\\Segment07-long-folder-name\\Segment08-long-folder-name\\Segment09-long-folder-name\\Segment10-long-folder-name\\Segment11-long-folder-name\\",
+      "expected": "C:\\SEGMENT00-LONG-FOLDER-NAME\\SEGMENT01-LONG-FOLDER-NAME\\SEGMENT02-LONG-FOLDER-NAME\\SEGMENT03-LONG-FOLDER-NAME\\SEGMENT04-LONG-FOLDER-NAME\\SEGMENT05-LONG-FOLDER-NAME\\SEGMENT06-LONG-FOLDER-NAME\\SEGMENT07-LONG-FOLDER-NAME\\SEGMENT08-LONG-FOLDER-NAME\\SEGMENT09-LONG-FOLDER-NAME\\SEGMENT10-LONG-FOLDER-NAME\\SEGMENT11-LONG-FOLDER-NAME",
+      "note": "path longer than MAX_PATH"
+    },
+    {
+      "category": "long",
+      "input": "\\\\?\\C:\\Segment00-long-folder-name\\Segment01-long-folder-name\\Segment02-long-folder-name\\Segment03-long-folder-name\\Segment04-long-folder-name\\Segment05-long-folder-name\\Segment06-long-folder-name\\Segment07-long-folder-name\\Segment08-long-folder-name\\Segment09-long-folder-name\\Segment10-long-folder-name\\Segment11-long-folder-name\\",
+      "expected": "C:\\SEGMENT00-LONG-FOLDER-NAME\\SEGMENT01-LONG-FOLDER-NAME\\SEGMENT02-LONG-FOLDER-NAME\\SEGMENT03-LONG-FOLDER-NAME\\SEGMENT04-LONG-FOLDER-NAME\\SEGMENT05-LONG-FOLDER-NAME\\SEGMENT06-LONG-FOLDER-NAME\\SEGMENT07-LONG-FOLDER-NAME\\SEGMENT08-LONG-FOLDER-NAME\\SEGMENT09-LONG-FOLDER-NAME\\SEGMENT10-LONG-FOLDER-NAME\\SEGMENT11-LONG-FOLDER-NAME",
+      "note": "long path with prefix"
+    },
+    {
+      "category": "invalid",
+      "input": "",
+      "expected": null,
+      "note": "empty"
+    },
+    {
+      "category": "invalid",
+      "input": "   ",
+      "expected": null,
+      "note": "whitespace only"
+    },
+    {
+      "category": "invalid",
+      "input": "\"\"",
+      "expected": null,
+      "note": "empty quotes"
+    },
+    {
+      "category": "invalid",
+      "input": "Clients\\Acme",
+      "expected": null,
+      "note": "relative"
+    },
+    {
+      "category": "invalid",
+      "input": ".\\Acme",
+      "expected": null,
+      "note": "dot-relative"
+    },
+    {
+      "category": "invalid",
+      "input": "\\Clients\\Acme",
+      "expected": null,
+      "note": "rooted without drive"
+    },
+    {
+      "category": "invalid",
+      "input": "1:\\foo",
+      "expected": null,
+      "note": "not a drive letter"
+    }
+  ]
+}
