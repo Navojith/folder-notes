@@ -14,6 +14,13 @@ A folder is identified by a **FolderRef**:
 | `path_display` | path as the user sees it | original casing |
 | `volume_serial` | `GetFileInformationByHandleEx(FileIdInfo).VolumeSerialNumber` | null for network/removable |
 | `file_id` | `FILE_ID_INFO.FileId` (128-bit, hex) | stable across rename/move on the same volume (NTFS & ReFS) |
+
+Hex format (shared with the C++ reader): upper-case, no separators. `volume_serial` is the 64-bit
+`VolumeSerialNumber` as 16 digits. `file_id` is 32 digits: the 16 `Identifier` bytes read as two
+little-endian `uint64`s, `hi = bytes[8..15]` printed first, then `lo = bytes[0..7]`. Volumes that
+don't give a usable ID store both as `NULL` and are tracked by path only. That covers
+network and removable drives, file systems other than NTFS/ReFS (checked with
+`GetVolumeInformationByHandleW`, because exFAT/FAT IDs aren't stable), and an all-zero ID.
 | `volume_kind` | `fixed` / `removable` / `network` | from `GetDriveType` |
 
 **Canonical path (from S4).** Before any lookup, open the folder (`FILE_READ_ATTRIBUTES`,

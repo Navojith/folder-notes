@@ -118,9 +118,12 @@ public interface ISearchService {
 }
 
 public interface IFolderIdentityService {
-    FolderRef Resolve(string path);                 // path → normalized path + volume/file id
-    string? Locate(FolderRef storedRef);            // find the current path for a stored ref
+    FolderRef Resolve(string path);                 // path → canonical + normalized path + volume/file id
+    bool TryResolve(string path, out FolderRef folder); // false for invalid paths or files
+    LocateResult Locate(FolderRef storedRef);       // find the current path for a stored ref
 }
+// LocateResult(Status, Path): Found (path, maybe moved) · InRecycleBin (path under $Recycle.Bin)
+// · NotFound. A ref without a file ID (network/removable, REQ-062) is "Found" only if its path exists.
 
 public interface IExplorerTracker {                 // App layer
     event EventHandler<ActiveFolderChangedEventArgs> ActiveFolderChanged; // HWND, path or null

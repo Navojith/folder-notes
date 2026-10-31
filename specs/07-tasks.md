@@ -66,7 +66,11 @@ superseded), and specs 03/04 reflect what was learned.
   normalization rules. Mapped drives are injected from the vector file.* *Done when:* there are 40 or more
   vectors (drive letters, UNC, mapped drives, `\\?\`, trailing slash, casing, long paths, Unicode)
   and all of them pass.
-- [ ] **T1.4 🧱 FolderIdentity service** (REQ-060, 061, 062), from S4's findings. *Done when:*
+- [x] **T1.4 🧱 FolderIdentity service** (REQ-060, 061, 062), from S4's findings. *Done
+  2026-10-31: 18 integration tests on real NTFS temp folders (rename, move, ancestor rename,
+  delete, Recycle Bin, recreate, copy, spellings, 8.3). IDs are stored only on NTFS/ReFS.
+  `Locate` returns Found / InRecycleBin / NotFound (spec 02). The ID-first lookup (ADR-009)
+  needs the repository, so it's in T1.5.* *Done when:*
   integration tests for rename, move, delete → orphan, and relink pass on real temp folders.
 - [ ] **T1.5 🧱 SQLite schema + migrations + repository** (REQ-001…006, 010…012).
   Single-writer queue, soft delete/restore, `NoteChanged` event, backup before migration.
