@@ -7,6 +7,7 @@
     "exFAT", "FTS5", "foldernote", "foldernotes", "HKCR", "HKCU", "HKLM", "HWND", "infotip", "Infotip", "infotips",
     "LOCALAPPDATA", "Markdig", "MSIX", "MSVC", "MSBuild", "Mvvm", "NFR", "NOACTIVATE", "NTFS", "PIDL",
     "ReFS", "relink", "Serilog", "shellex", "shellext", "Shouldly", "slnx", "subst", "TOOLWINDOW",
-    "licence", "SHCNE", "UPDATEITEM", "unregister", "unregisters", "vcvars", "vswhere", "WinAppSDK", "WinUI", "xunit"
+    "licence", "SHCNE", "UPDATEITEM", "unregister", "unregisters", "vcvars", "vswhere", "WinAppSDK", "WinUI", "xunit",
+    "bm25", "Damerau", "Levenshtein", "upsert", "upserts", "Upserting", "rowid", "rowids", "savepoint", "snake_case", "cobertura", "VACUUM"
   ]
 }

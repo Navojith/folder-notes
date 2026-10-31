@@ -81,12 +81,16 @@ superseded), and specs 03/04 reflect what was learned.
   *Done when:* repository tests pass, including concurrent reader + writer.
 - [x] **T1.6 🧱 Search** (REQ-051, 052, 023). *Done 2026-10-31: the grammar is in 03 § Search
   query grammar, with 50+ parser tests. The 10k-note benchmark (xunit `Category=Performance`, Debug
-  build) has a worst p95 of about 40 ms (typo fallback about 30 ms). BenchmarkDotNet is deferred to
+  build) has a worst p95 of 54 ms (`due:30d`, typo fallback 30 ms). BenchmarkDotNet is deferred to
   T5.5. Fixing it found a full-scan conflict check in upsert, now index-backed.* FTS5 index maintenance, query parser for filters,
   ranking, and the typo fallback. *Done when:* parser tests pass and the benchmark is <100 ms at 10k notes.
-- [ ] **T1.7 🧱 Export / import JSON** (REQ-070). *Done when:* a round-trip test is lossless.
+- [x] **T1.7 🧱 Export / import JSON** (REQ-070). *Done 2026-10-31: `NotePortability`, with the
+  format and import rules in 03 § Export format. The lossless round-trip test passes, and so does
+  export → import → export (byte-identical). Import is one transaction, with a savepoint per note.*
+  *Done when:* a round-trip test is lossless.
 
-**Exit:** Core coverage ≥85% and all Phase 1 tests are green.
+**Exit:** Core coverage ≥85% and all Phase 1 tests are green. *Met 2026-10-31: 362/362 green
+(Debug + Release), Core line coverage 93.0% (branch 86.6%).*
 
 ---
 

@@ -253,3 +253,36 @@ keeps the DB version and saves the sidecar as a revision in the note history (v2
 ## Export format (REQ-070)
 
 `foldernotes-export-YYYYMMDD.json` = `{ "schema": "foldernotes-export/1", "labels": [...], "notes": [...sidecar shape + path_display...] }`.
+
+Full shape (T1.7). It's UTF-8, snake_case, and null fields are written out:
+
+```json
+{
+  "schema": "foldernotes-export/1",
+  "exported_at": "2026-10-31T10:00:00.000Z",
+  "labels": [{ "name": "client", "color": "blue" }],
+  "notes": [{
+    "id": "8f0c…", "path_display": "D:\\Clients\\Acme",
+    "title": "Client: Acme Ltd", "body_md": "…", "status": "keep", "accent_color": null,
+    "labels": ["client"],
+    "keep_until": "2027-01-01", "review_on": null, "safe_after": null,
+    "travel_with_folder": false,
+    "created_at": "2026-01-02T08:00:00.000Z", "updated_at": "2026-10-31T10:00:00.000Z"
+  }]
+}
+```
+
+- Export skips soft-deleted notes. A full export includes every label. A selection includes only
+  the labels its notes use. Volume and file IDs aren't exported because they're machine-specific.
+  Import re-reads them from the folder if it exists.
+- **Import is one transaction**: either all valid notes go in or (on an I/O or schema error) none
+  do. Entries that fail validation are skipped and listed in the report. Unknown `schema` → refused.
+- **Labels:** created if missing. If a label with that name exists, it takes the **exported color**
+  (import is a restore, and keeping colors is what makes the round trip lossless).
+- **Matching (REQ-070, by path):** a note matches the live note at the same `path_norm`, or else the
+  live note with the same `id`. Otherwise it's new. It keeps its exported `id` unless that id is
+  already used (for example by a deleted note), in which case it gets a new one.
+- **Conflicts** (a match exists) follow `ImportConflictPolicy`. The default, `NewerWins`, matches the
+  sidecar rule: the import replaces the note only if its `updated_at` is newer. The other policies
+  are `Overwrite` and `KeepExisting`. A replaced note keeps its existing `id` and `created_at`.
+- Imported timestamps are kept as they are (not "now").

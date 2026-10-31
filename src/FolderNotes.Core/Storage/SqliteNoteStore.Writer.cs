@@ -6,10 +6,11 @@ namespace FolderNotes.Core.Storage;
 public sealed partial class SqliteNoteStore
 {
     /// <summary>The transaction a queued write runs in, plus the events to raise after commit.</summary>
-    internal sealed class WriteContext(SqliteConnection connection, SqliteTransaction transaction)
+    internal sealed class WriteContext(SqliteNoteStore store, SqliteConnection connection, SqliteTransaction transaction)
     {
         private readonly List<NoteChangedEventArgs> _events = [];
 
+        public SqliteNoteStore Store { get; } = store;
         public SqliteConnection Connection { get; } = connection;
         public SqliteTransaction Transaction { get; } = transaction;
         public bool LabelsChanged { get; set; }
@@ -24,6 +25,9 @@ public sealed partial class SqliteNoteStore
         }
 
         public void Raise(Guid noteId, NoteChangeKind kind, string pathNorm) => _events.Add(new(noteId, kind, pathNorm));
+
+        /// <summary>For work rolled back to a savepoint: its events must not be raised.</summary>
+        public void DropEventsFor(Guid noteId) => _events.RemoveAll(e => e.NoteId == noteId);
     }
 
     private abstract class WriteOp
@@ -52,7 +56,7 @@ public sealed partial class SqliteNoteStore
             try
             {
                 using var tx = store._writer.BeginTransaction(deferred: false);
-                ctx = new WriteContext(store._writer, tx);
+                ctx = new WriteContext(store, store._writer, tx);
                 result = work(ctx);
                 tx.Commit();
             }
