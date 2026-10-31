@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The note editor (specs/05 § Note editor, § Editor behaviour). Hosted by EditorWindow; the main window reuses it in T2.4. -->
+<UserControl
+    x:Class="FolderNotes.App.Editor.NoteEditorView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FolderNotes.App.Controls"
+    xmlns:md="using:FolderNotes.App.Markdown">
+  <Grid>
+    <!-- Missing folder / note -->
+    <InfoBar x:Name="MissingBar" AutomationProperties.AutomationId="EditorMissing" Severity="Warning"
+             Title="Can't open this note" IsClosable="False" IsOpen="False" VerticalAlignment="Top" />
+
+    <!-- Deleted, with Undo (REQ-006) -->
+    <InfoBar x:Name="DeletedBar" AutomationProperties.AutomationId="EditorDeleted" Severity="Informational"
+             Title="Note deleted" Message="You can undo this for 10 seconds." IsClosable="False" IsOpen="False"
+             VerticalAlignment="Top">
+      <InfoBar.ActionButton>
+        <Button x:Name="UndoButton" Content="Undo" AutomationProperties.AutomationId="UndoDelete" Click="OnUndo" />
+      </InfoBar.ActionButton>
+    </InfoBar>
+
+    <Grid x:Name="EditorPanel" RowSpacing="{StaticResource SpacingL}" Visibility="Collapsed">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- Header: folder path + Open folder -->
+      <Grid ColumnSpacing="{StaticResource SpacingM}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="FolderText" AutomationProperties.AutomationId="FolderPath" AutomationProperties.Name="Folder"
+                   Style="{StaticResource BodyStrongTextBlockStyle}" TextTrimming="CharacterEllipsis"
+                   IsTextSelectionEnabled="True" VerticalAlignment="Center" />
+        <Button x:Name="OpenFolderButton" Grid.Column="1" Content="Open folder"
+                AutomationProperties.AutomationId="OpenFolder" Click="OnOpenFolder" />
+      </Grid>
+
+      <ScrollViewer Grid.Row="1" Padding="0,0,12,0" VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="{StaticResource SpacingL}">
+          <StackPanel Spacing="{StaticResource SpacingS}">
+            <TextBox x:Name="TitleBox" Header="Title" AutomationProperties.AutomationId="Title"
+                     MaxLength="200" TextChanged="OnTitleChanged" />
+            <TextBlock x:Name="TitleErrorText" AutomationProperties.AutomationId="TitleError"
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" Style="{StaticResource CaptionTextBlockStyle}"
+                       Visibility="Collapsed" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <Grid ColumnSpacing="{StaticResource SpacingL}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <ComboBox x:Name="StatusBox" Header="Status" MinWidth="170" AutomationProperties.AutomationId="Status"
+                      SelectionChanged="OnStatusChanged" />
+            <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingS}">
+              <TextBlock Text="Color" />
+              <GridView x:Name="ColorGrid" AutomationProperties.AutomationId="AccentColor" AutomationProperties.Name="Color"
+                        SelectionMode="Single" IsItemClickEnabled="False" SelectionChanged="OnColorChanged" Padding="0">
+                <GridView.ItemContainerStyle>
+                  <Style TargetType="GridViewItem">
+                    <Setter Property="MinWidth" Value="30" />
+                    <Setter Property="MinHeight" Value="30" />
+                    <Setter Property="Margin" Value="0,0,2,2" />
+                    <Setter Property="Padding" Value="0" />
+                  </Style>
+                </GridView.ItemContainerStyle>
+              </GridView>
+            </StackPanel>
+          </Grid>
+
+          <StackPanel Spacing="{StaticResource SpacingS}">
+            <TextBlock Text="Labels" />
+            <controls:WrapPanel x:Name="LabelPanel" Spacing="6" AutomationProperties.AutomationId="Labels" />
+            <AutoSuggestBox x:Name="LabelBox" PlaceholderText="Add label…" AutomationProperties.AutomationId="AddLabel"
+                            AutomationProperties.Name="Add label" TextChanged="OnLabelTextChanged"
+                            QuerySubmitted="OnLabelSubmitted" GotFocus="OnLabelFocus" />
+            <TextBlock x:Name="LabelErrorText" AutomationProperties.AutomationId="LabelError"
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}" Style="{StaticResource CaptionTextBlockStyle}"
+                       Visibility="Collapsed" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <Grid ColumnSpacing="{StaticResource SpacingM}">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="{StaticResource SpacingS}">
+              <CalendarDatePicker x:Name="KeepPicker" Header="Keep until" HorizontalAlignment="Stretch"
+                                  AutomationProperties.AutomationId="KeepUntil" DateChanged="OnDateChanged" />
+              <HyperlinkButton x:Name="KeepClear" Content="Clear" Padding="2,0" Click="OnClearDate"
+                               AutomationProperties.Name="Clear keep until" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingS}">
+              <CalendarDatePicker x:Name="ReviewPicker" Header="Review on" HorizontalAlignment="Stretch"
+                                  AutomationProperties.AutomationId="ReviewOn" DateChanged="OnDateChanged" />
+              <HyperlinkButton x:Name="ReviewClear" Content="Clear" Padding="2,0" Click="OnClearDate"
+                               AutomationProperties.Name="Clear review on" />
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="{StaticResource SpacingS}">
+              <CalendarDatePicker x:Name="SafePicker" Header="Safe after" HorizontalAlignment="Stretch"
+                                  AutomationProperties.AutomationId="SafeAfter" DateChanged="OnDateChanged" />
+              <HyperlinkButton x:Name="SafeClear" Content="Clear" Padding="2,0" Click="OnClearDate"
+                               AutomationProperties.Name="Clear safe after" />
+            </StackPanel>
+          </Grid>
+
+          <StackPanel Spacing="{StaticResource SpacingS}">
+            <SelectorBar x:Name="BodyTabs" SelectionChanged="OnBodyTabChanged" AutomationProperties.Name="Body view">
+              <SelectorBarItem x:Name="WriteTab" Text="Write" IsSelected="True" />
+              <SelectorBarItem x:Name="PreviewTab" Text="Preview" />
+            </SelectorBar>
+            <TextBox x:Name="BodyBox" AutomationProperties.AutomationId="Body" AutomationProperties.Name="Body"
+                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="180" MaxLength="50000"
+                     PlaceholderText="Notes (Markdown: **bold**, *italic*, - lists, - [ ] tasks, [links](https://…))"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto" TextChanged="OnBodyChanged" />
+            <Border x:Name="PreviewBorder" Visibility="Collapsed" MinHeight="180" Padding="12,8"
+                    CornerRadius="{StaticResource ControlCornerRadius}" BorderThickness="1"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+              <md:MarkdownView x:Name="Preview" AutomationProperties.AutomationId="Preview" />
+            </Border>
+            <TextBlock x:Name="BodyErrorText" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                       Style="{StaticResource CaptionTextBlockStyle}" Visibility="Collapsed" TextWrapping="Wrap" />
+          </StackPanel>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- Footer: autosave indicator (REQ-005) + Delete (REQ-006) -->
+      <Grid Grid.Row="2" ColumnSpacing="{StaticResource SpacingL}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="SaveText" AutomationProperties.AutomationId="SaveState" AutomationProperties.LiveSetting="Polite"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                   HorizontalAlignment="Right" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        <Button x:Name="DeleteButton" Grid.Column="1" Content="Delete" AutomationProperties.AutomationId="Delete"
+                Click="OnDelete" />
+      </Grid>
+    </Grid>
+  </Grid>
+</UserControl>

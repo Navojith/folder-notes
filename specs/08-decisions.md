@@ -155,3 +155,36 @@ for a run-time key (a label's colour) goes through `ThemeTokens`, which reads th
 the element's `ActualTheme`. Adding a status or palette colour means editing `Tokens.xaml`, and
 the tests fail until every theme has it. A hex-colour lint test keeps colours out of other files.
 
+## ADR-014: Editor = one view model per session; drafts are saved on first edit — *accepted (T2.3, 2026-10-31)*
+
+**Context:** REQ-003/005/006 need a pre-filled editor, autosave without a Save button, and delete
+with undo. Opening "Add folder note…" by accident shouldn't leave empty notes behind. The logic
+has to be testable without a XAML runtime.
+**Decision:** `NoteEditorViewModel` (CommunityToolkit.Mvvm) holds the whole session. Timers go
+through `TimeProvider` and callbacks through `IUiDispatcher`. A new note is a draft until the
+first edit or an explicit `Ctrl+Enter`. On close, invalid fields go back to their last saved
+value and everything else is saved, instead of blocking the close or dropping every change.
+Markdown is parsed by Markdig into an app-owned model and rendered by our own small
+`RichTextBlock` renderer, not by a third-party WinUI Markdown control (none ships for Windows App
+SDK 2.x that we'd trust, and the panel needs the same output).
+**Consequences:** No orphan empty notes; nothing valid is lost on close. The view stays thin, and
+every rule in 05 § Editor behaviour is unit-tested with a fake clock. We own the renderer, but its
+scope is limited to the REQ-007 subset. Concurrent edits are last-write-wins for now.
+
+## ADR-015: Reuse one hidden editor window instead of destroying it — *accepted (T2.3, 2026-10-31)*
+
+**Context:** REQ-080 keeps the tray process small, so T2.1 destroys windows on close. Measured in
+T2.3 (Release): every open/close of a destroyed editor window left about 4 MB of native memory
+behind (private bytes 83 → 108 MB over 8 cycles). Without UI Automation attached the result was
+the same, a forced GC didn't help (the managed heap is about 1 MB), and the plain main window
+showed the same pattern at a smaller scale. The memory is held natively by WinUI, not by our objects.
+**Options:** keep destroying windows (unbounded growth); host editors in a child process (large
+change); hide one window and reuse it.
+**Decision:** `EditorWindow` hides on close, and `AppShell` keeps one hidden window and attaches the
+next `NoteEditorViewModel` to it (02 § Editor). Only extra concurrent editors are destroyed.
+**Consequences:** Memory is flat over repeated use (≈65 MB private working set / ≈83 MB private
+bytes after 8 cycles, ±2 MB). The first editor's one-time cost (≈33 MB over tray-only) stays for
+the process lifetime, which is the REQ-080 gap recorded as O-15. A reused window must reset
+per-session UI state (`NoteEditorView.ResetForNewSession`). The main window (T2.4) should get the
+same treatment once it holds the library.
+

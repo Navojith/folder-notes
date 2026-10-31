@@ -26,6 +26,8 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Markdig" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\FolderNotes.ico" CopyToOutputDirectory="PreserveNewest" />

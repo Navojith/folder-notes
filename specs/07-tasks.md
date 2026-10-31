@@ -121,9 +121,21 @@ superseded), and specs 03/04 reflect what was learned.
   `StatusVisuals` covers every status; `LabelChip` / `StatusPill` exist with UIA names;
   `ThemeService` switches a live window between System/Light/Dark; screenshots of the token
   sample in light, dark and HC look right; the placeholder icon is replaced.
-- [ ] **T2.3 🧱 Note editor page + compact editor window** (REQ-002…007, 011, 020). Autosave
-  indicator and delete with undo. *Done when:* `FolderNotes.exe --edit "C:\Temp\x"` creates and
-  edits a note end to end.
+- [x] **T2.3 🧱 Note editor page + compact editor window** (REQ-002…007, 011, 020). Autosave
+  indicator and delete with undo. See 05 § Editor behaviour, 02 § Editor / § Markdown.
+  *Done when:* `FolderNotes.exe --edit "C:\Temp\x"` (an existing folder) creates and edits a note
+  end to end; view-model tests cover draft/autosave/flush/delete-undo/labels with a fake clock;
+  killing the app mid-edit loses at most the last 500 ms (REQ-005 AC, checked live).
+  *Done 2026-10-31: `NoteEditorViewModel` (ADR-014) + `NoteEditorView` + `EditorWindow` (reused,
+  ADR-015), `MarkdownModel`/`MarkdownView` (Markdig 1.4), `WrapPanel`, `ColorSwatch`. 48 new App
+  tests (24 view model, 19 Markdown, 5 line endings). Checked live on Release via UI Automation:
+  `--edit "C:\Temp\x"` → draft titled "x" → typed → "Saved" and the row in SQLite; inline label
+  created (orange, least used); preview renders; killed 50 ms after a title edit and 850 ms after
+  a body edit → body kept, title lost (REQ-005 AC); a second `--edit` reuses the open window;
+  delete → Undo → delete → window closes itself after 10 s; a reused window shows the next
+  folder's fresh session. Found and fixed live: the TextBox's bare CR line breaks (now stored as
+  LF), and a native memory leak per destroyed window (ADR-015). REQ-080 after using the editor is
+  65 MB, over the 60 MB target: O-15, decision pending.*
 - [ ] **T2.4 🧱 Library view** (REQ-054). List/grid, sort, filter, master/detail.
 - [ ] **T2.5 🧱 Labels manager** (REQ-012, 013).
 - [ ] **T2.6 🧱 Search palette + global hotkey** (REQ-050…053).

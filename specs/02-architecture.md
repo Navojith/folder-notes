@@ -124,8 +124,10 @@ Resolved in T2.1:
 - **Redirection:** a second process calls `AppInstance.RedirectActivationToAsync` and exits. The
   main instance gets `AppInstance.Activated` on a background thread, marshals it to the UI
   thread, and runs it through the same parser and `CommandRouter` as its own startup args.
-- **Until the target screen exists**, a command opens the main window (T2.3 adds the editor,
-  T2.6 the search palette) and the command is logged.
+- **Until the target screen exists**, a command opens the main window (T2.6 adds the search
+  palette) and the command is logged.
+- **T2.3:** `--edit` and `--open-note` open the compact editor window (05 § Editor behaviour),
+  one per note/folder. `--open-note` moves to the main window's detail pane in T2.4.
 
 ## App shell (T2.1)
 
@@ -151,6 +153,35 @@ Resolved in T2.1:
   daily, 7 files kept, minimum level Information (Debug in Debug builds). Unhandled exceptions
   (XAML `UnhandledException`, `AppDomain`, `TaskScheduler.UnobservedTaskException`) are logged
   as Fatal/Error before anything else happens.
+
+## Editor (T2.3)
+
+- **`NoteEditorViewModel`** (CommunityToolkit.Mvvm `ObservableObject`, no XAML types) owns one
+  editing session: load, draft, validation, debounced autosave, flush, delete/undo, label
+  suggestions. Dependencies: `INoteRepository`, `ILabelRepository`, `IFolderIdentityService`,
+  `TimeProvider` (debounce and undo timers, so tests use `FakeTimeProvider`), `IUiDispatcher`
+  (timer callbacks are marshalled to the UI thread), and `ILogger`. Created per window by a factory
+  registered in DI. Tests: `FolderNotes.App.Tests/Editor`.
+- **`EditorWindow`** hosts `NoteEditorView`: 560×640 logical px, Mica, registered with
+  `ThemeService`. It's centred on the foreground Explorer window (`CabinetWClass`) if there is
+  one, otherwise on the monitor under the cursor, and kept inside that monitor's work area.
+  `AppShell` keeps the open editors keyed by note ID and folder `PathNorm`.
+- **Editor windows are reused, not destroyed (ADR-015).** Closing an editor flushes it, hides the
+  window and disposes its view model; `AppShell` keeps **one** hidden editor window and attaches
+  the next session to it. Extra windows (several editors open at once) are destroyed when closed.
+  Quit flushes every editor and then destroys all of them.
+- **Idle trim.** When the last window has closed, `IdleTrim` runs one aggressive, compacting GC
+  after 3 s, so the managed wrappers of a destroyed window (and the native XAML objects they hold)
+  are released even though an idle tray process never triggers a GC on its own.
+
+## Markdown (REQ-007)
+
+`MarkdownModel.Parse(string)` (Markdig 1.4, task lists + auto-links, HTML not rendered) turns the
+body into a small UI-free model: blocks (heading 1–6, paragraph, list item with depth, marker and
+an optional task check, code block, quote, rule) holding spans (text with bold/italic/code/strike
+flags, links). `MarkdownView` renders the model into a `RichTextBlock`. Links open only for
+`http`, `https` and `mailto`; anything else renders as plain text. Raw HTML is shown as text. The
+model is unit-tested; the renderer is checked by eye. The companion panel (T3.4) reuses it.
 
 ## Key interfaces (FolderNotes.Core)
 

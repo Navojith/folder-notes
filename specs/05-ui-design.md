@@ -125,6 +125,53 @@ and draws nothing itself.
   window, with the title field focused. `Esc` saves and closes, and `Ctrl+Enter` does the same.
 - "Saved ✓" is an autosave indicator (REQ-005). There's no Save button.
 
+#### Editor behaviour (T2.3)
+
+One view (`NoteEditorView`) bound to one `NoteEditorViewModel`; the compact window hosts it now and
+the main window's detail pane reuses it in T2.4.
+
+- **Opening.** `--edit <path>`: the path must be an existing folder, otherwise the window shows
+  "This folder doesn't exist" and nothing else. The folder is resolved (02 `TryResolve`) and looked up
+  with `GetByFolderAsync`; a hit opens that note (REQ-004, and REQ-001: a second "Add" opens the
+  existing note). A miss opens a **draft**: `Note.CreateFor(folder)` with the folder name as the
+  title (REQ-003), selected so typing replaces it. `--open-note <id>` opens that note (also in the
+  compact window until T2.4); an unknown or deleted id shows "This note no longer exists".
+  If an editor for the same note or folder is already open, it's activated instead of opening a second one.
+- **Drafts aren't saved until the first edit.** Closing an untouched draft (close button or `Esc`)
+  creates nothing. `Ctrl+Enter` is an explicit save, so it creates the note even if untouched.
+- **Autosave (REQ-005).** Every change re-validates (`NoteValidator`). A valid change schedules a
+  save 500 ms after the last change (debounced); saves are serialized, and a change during a save
+  schedules another one. Invalid state: no save is scheduled, and the field shows the rule's
+  message inline (title errors under the title, label errors under the labels box).
+- **Indicator** (bottom right, `AutomationId=SaveState`, also a live region): *(empty)* for an
+  untouched note · "Saving…" while a save is pending or running · "Saved" · "Not saved: <first error>" ·
+  "Couldn't save: <reason>" (store error; the next change retries).
+- **Close / flush.** The close button, `Esc` and `Ctrl+Enter` all flush: a pending save runs now. A
+  field that is invalid at close is put back to its last saved value (a draft's title goes back to
+  the suggested title) and the rest is saved, so only the invalid text is lost. `Esc` and
+  `Ctrl+Enter` then close the window.
+- **Delete (REQ-006).** [Delete] asks for confirmation (ContentDialog: "Delete this note?" ·
+  Delete / Cancel). It's disabled for an unsaved draft. On confirm, any pending save is dropped, the
+  note is soft-deleted, and the editor swaps to a "Note deleted" InfoBar with **Undo** for 10 s
+  (fields hidden). Undo restores it (same ID and content) and returns to editing. When the 10 s run
+  out, the compact window closes itself; closing it earlier keeps the delete.
+- **Labels (REQ-011).** An `AutoSuggestBox`: suggestions are existing labels not already on the
+  note, matching by prefix first and then substring, case-insensitive, at most 8. If nothing
+  matches the text exactly, the last suggestion is `Create label "<text>"`. Enter or picking a
+  suggestion adds it. A new label gets the palette colour used by the fewest existing labels
+  (ties go to palette order) and is created by the save (the store creates unknown labels by name).
+  Chips have a remove button ("Remove label <name>"). Label rule errors (`label.*`,
+  `labels.duplicate`) show inline and the label isn't added.
+- **Fields.** Status: ComboBox of the six statuses (icon + text). Colour: "None" + 12 swatches
+  (radio group, UIA name = colour key). Dates: three `CalendarDatePicker`s with a clear button each.
+  Body: SelectorBar *Write* / *Preview*. Write is a multi-line `TextBox` (`AcceptsReturn`, 50k
+  limit; its bare CR line breaks are stored as LF); Preview renders the Markdown (REQ-007, see 02 § Markdown). *Travel with folder* stays
+  hidden until REQ-071 (Phase 5).
+- **Header.** The folder's display path (selectable) and [Open folder], which opens it in Explorer
+  (disabled when the folder is missing).
+- **Concurrent edits** of the same note from another surface (panel in Phase 3): last write wins.
+  The editor doesn't reload while open (revisit in T3.4).
+
 ### 3. Main window: NavigationView (left rail)
 
 - **All notes**: a list or card grid toggle. Each row shows the accent bar, title, path (trimmed

@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.3 Note editor page + compact editor window
+**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.4 Library view (after the O-15 decision)
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 2 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 3 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -39,7 +39,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T1.7 Export / import JSON | ✅ | 2026-10-31 | `eb44b8e` | Lossless + byte-identical re-export |
 | T2.1 WinUI 3 app skeleton | ✅ | 2026-10-31 | `38116ec` | App.Tests (47); ADR-012 tray; O-11 closed by `UiNoteEvents` |
 | T2.2 Theme + design tokens | ✅ | 2026-10-31 | `7e3c22f` | ADR-013; 12 colours AA-checked by test; real icon; HC visual check → O-14 |
-| T2.3 Note editor + compact window | ⚪ next | | | |
+| T2.3 Note editor + compact window | ✅ | 2026-10-31 | _pending_ | ADR-014/015; e2e via UIA on Release; REQ-080 gap → O-15 |
+| T2.4 Library view | ⚪ next | | | Waits on the O-15 decision; the main window needs ADR-015-style reuse |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -58,6 +59,9 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | Phase 1 exit: Core coverage | ≥85% | 93.0% line / 86.6% branch (362 tests) | Phase 1 | ✅ |
 | REQ-080 idle RAM (private working set) | <60 MB | 31.7 MB tray-only; 54.2 MB after the main window was opened and closed (private bytes 46.8 / 70.7 MB), Release | T2.1 | ✅ |
 | Redirected second launch | (no target) | process exits ≈120 ms after start | T2.1 | ✅ |
+| REQ-005 autosave on kill | lose ≤500 ms | body typed 850 ms before kill kept; title typed 50 ms before kill lost | T2.3 | ✅ |
+| REQ-080 idle RAM after using the editor | <60 MB | 65 MB private working set (83 MB private bytes), flat over 8 open/close cycles after ADR-015; was +4 MB per cycle before | T2.3 | ❌ O-15 |
+| REQ-080 idle RAM after main window (token sample) | <60 MB | 60–68 MB, levels off by cycle 4 | T2.3 | ❌ O-15 |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
 ## Open items to verify
@@ -79,6 +83,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-12 | Tray icon comes back after an Explorer restart (`TaskbarCreated`), and has the right size at 150% / mixed DPI | 02 § App shell / ADR-012 | T3.5 manual | open: code path written, not exercised (didn't restart the user's Explorer) |
 | O-13 | Memory after the window closes stays ~23 MB above tray-only (XAML stays loaded). Under target now; recheck once real pages exist | REQ-080 | T5.5 | open |
 | O-14 | High-contrast look of chips, pills and windows (tokens map to system colours; tests check the file, but nobody has seen it on screen) and a live HC toggle re-rendering open chips | 05 § Design tokens | T2.9 manual | open: switching HC changes the user's whole desktop theme, so T2.2 didn't do it |
+| O-15 | REQ-080 is over target once a window has been used: ≈65 MB private working set (≈83 MB private bytes) vs <60 MB, the one-time cost of loading WinUI's controls. An idle `EmptyWorkingSet` would show 2.7 MB in Task Manager, but commit stays at 83 MB. Options: trim the working set when idle, change the target or metric, or host windows in a child process | REQ-080 / ADR-015 | before T2.4 | **open: needs a decision from the user** |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
 ## Blockers
@@ -104,6 +109,26 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-10-31 (T2.3)
+- **T2.3 done:** a compact editor window for `--edit` and `--open-note`. `NoteEditorViewModel`
+  covers drafts (saved on the first edit), the 500 ms debounced autosave, flush on close (invalid
+  fields go back to their last saved value), delete with a 10 s Undo, and label suggestions with
+  inline create. Also new: Markdown preview through an app-owned model (Markdig) and a
+  `RichTextBlock` renderer. CommunityToolkit.Mvvm 8.4.2 and Markdig 1.4.0 added. 541/541 tests
+  green in Release (App.Tests 131 → 179).
+- **Spec changes made first:** 05 § Editor behaviour, 02 § Editor and § Markdown, a T2.3
+  *Done when* in 07, ADR-014. Added during the task: ADR-015 and 02's window-reuse and idle-trim
+  notes.
+- **Learned (live runs):**
+  - WinUI's TextBox reports bare CR line breaks, which would have reached the database.
+  - Destroying a WinUI window leaks about 4 MB of native memory per cycle, even with no UI
+    Automation attached and after a forced GC, so editor windows are now reused (ADR-015).
+  - Using any real window costs about 33 MB once, which puts REQ-080 over target (O-15).
+  - The starter labels (REQ-013) are already seeded by `Schema.cs`.
+- **Test residue on this machine:** two soft-deleted "Client X" notes (purged later) and a label
+  `e2e-label` in the dev database. The label can be deleted from the Labels page once T2.5 exists.
+- **Next:** decide O-15, then T2.4 library view.
 
 ### 2026-10-31 (T2.2)
 - **T2.2 done:** `Themes/Tokens.xaml` holds every colour. For each of the 12 palette keys there's

@@ -1,4 +1,5 @@
 using FolderNotes.App.Activation;
+using FolderNotes.App.Editor;
 using FolderNotes.App.Services;
 using FolderNotes.App.Shell;
 using FolderNotes.App.Themes;
@@ -71,6 +72,7 @@ public partial class App : Application
         var theme = new ThemeService(new SystemHighContrastSignal(_log), uiDispatcher, _log);
         ThemeTokens.Service = theme; // T2.8 loads the saved theme setting before any window opens.
         _shell = new AppShell(theme, _log);
+        _shell.IdleTrim = new IdleTrim(ui, _log);
 
         try
         {
@@ -89,6 +91,11 @@ public partial class App : Application
         }
 
         _services = ConfigureServices(uiDispatcher, theme);
+        if (_store is not null)
+        {
+            var store = _store;
+            _shell.EditorFactory = () => new NoteEditorViewModel(store, store, _identity, TimeProvider.System, uiDispatcher, _log);
+        }
         _router = _services.GetRequiredService<CommandRouter>();
 
         var tray = _services.GetRequiredService<TrayIcon>();
@@ -161,7 +168,11 @@ public partial class App : Application
         _log.Information("Quitting");
         try
         {
-            _shell?.CloseMainWindow();
+            if (_shell is not null)
+            {
+                await _shell.CloseEditorsAsync(); // saves pending edits (REQ-005)
+                _shell.CloseMainWindow();
+            }
             if (_services is not null)
             {
                 await _services.DisposeAsync(); // tray icon, search service, UI relay
