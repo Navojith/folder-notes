@@ -50,7 +50,8 @@
 | Hotkey | `RegisterHotKey` on a message-only window | Simple, reliable |
 | Markdown | Markdig (parse) + custom WinUI renderer, or CommunityToolkit MarkdownTextBlock | Lightweight |
 | Packaging | MSIX with **sparse package / external location**, plus an unpackaged per-user installer as fallback | Win11 top-level context menu needs package identity (ADR-005) |
-| Tests | xUnit + FluentAssertions (Core), WinAppDriver/FlaUI (UI smoke), GoogleTest (ShellExt) | |
+| Tests | xunit.v3 on Microsoft Testing Platform + Shouldly (Core), FlaUI (UI smoke), GoogleTest (ShellExt) | FluentAssertions v8 needs a paid licence for commercial use, so it was replaced by Shouldly (T1.1) |
+| Build | `FolderNotes.slnx` via the `dotnet` CLI; ShellExt via CMake + Ninja (`eng/build-shellext.cmd`) | Builds without opening Visual Studio, and CI-friendly |
 
 ## Solution layout
 
@@ -63,13 +64,15 @@ folder-notes/
 │  ├─ FolderNotes.Core/         ← domain, repository, search, identity (no UI deps)
 │  ├─ FolderNotes.App/          ← WinUI 3 app, services, tray
 │  ├─ FolderNotes.ShellExt/     ← C++ DLL (infotip + IExplorerCommand)
+│  ├─ FolderNotes.ShellExt/     ← (CMake project, not in the .slnx)
 │  └─ FolderNotes.Package/      ← MSIX / sparse package manifest
 ├─ tests/
 │  ├─ FolderNotes.Core.Tests/
 │  ├─ FolderNotes.App.Tests/    ← view-model + service tests
 │  ├─ FolderNotes.UITests/      ← FlaUI smoke tests
 │  └─ FolderNotes.ShellExt.Tests/
-└─ FolderNotes.sln
+├─ eng/build-shellext.cmd
+└─ FolderNotes.slnx
 ```
 
 ## Process & concurrency model

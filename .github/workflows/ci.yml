@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build (.NET)
+        run: dotnet build FolderNotes.slnx -c Release
+
+      - name: Test (.NET)
+        run: dotnet test --solution FolderNotes.slnx -c Release --no-build
+
+      - name: Build shell extension (C++)
+        shell: cmd
+        run: eng\build-shellext.cmd Release x64

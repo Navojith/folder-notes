@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FolderNotes.App/FolderNotes.App.csproj">
+      <!-- WinUI self-contained needs a real architecture; build x64 when the solution is Any CPU. -->
+      <Platform Solution="*|Any CPU" Project="x64" />
+    </Project>
+    <Project Path="src/FolderNotes.Core/FolderNotes.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FolderNotes.Core.Tests/FolderNotes.Core.Tests.csproj" />
+  </Folder>
+</Solution>

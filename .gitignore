@@ -12,3 +12,4 @@ Release/
 *.obj
 *.log
 TestResults/
+artifacts/

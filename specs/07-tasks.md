@@ -50,7 +50,12 @@ superseded), and specs 03/04 reflect what was learned.
 
 ## Phase 1: Core (no UI)
 
-- [ ] **T1.1 🧱 Solution scaffold.** `FolderNotes.sln` with Core, App, ShellExt (empty), and test
+- [x] **T1.1 🧱 Solution scaffold.** *Done 2026-10-31: `FolderNotes.slnx` (Core, App with XAML,
+  Core.Tests), ShellExt as a CMake stub, central package versions, `global.json` (SDK 10.0.403 +
+  Microsoft Testing Platform), `.editorconfig`, README, `.github/workflows/ci.yml`. Build and
+  tests are green locally. CI isn't verified yet because there's no GitHub remote.
+  App.Tests is deferred to T2.1 (nothing to test yet).*
+  Original scope: `FolderNotes.sln` with Core, App, ShellExt (empty), and test
   projects. `Directory.Build.props` (nullable, warnings as errors), `.editorconfig`, and a
   `README.md` with build steps. *Done when:* `dotnet build` and `dotnet test` pass in CI (GitHub Actions, `windows-latest`).
 - [ ] **T1.2 🧱 Domain model + validation** (REQ-001, 002, 010, 020). `Note`, `Label`,

@@ -1,0 +1,3 @@
+<Project>
+  <!-- Spikes are throwaway and must not inherit the production build rules from the repo root. -->
+</Project>

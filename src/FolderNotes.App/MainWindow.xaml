@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="FolderNotes.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Folder Notes">
+  <Window.SystemBackdrop>
+    <MicaBackdrop />
+  </Window.SystemBackdrop>
+  <Grid Padding="32">
+    <StackPanel Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+      <TextBlock Text="Folder Notes" Style="{StaticResource TitleTextBlockStyle}" />
+      <TextBlock Text="Scaffold. The real UI arrives in Phase 2." Style="{StaticResource BodyTextBlockStyle}" />
+    </StackPanel>
+  </Grid>
+</Window>

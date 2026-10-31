@@ -1,0 +1,15 @@
+<Project>
+  <!-- Applies to every C# project under this folder (spikes/ has its own and is not in the solution). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <Company>Folder Notes</Company>
+    <Product>Folder Notes</Product>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>
