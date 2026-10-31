@@ -4,9 +4,9 @@
   "ignorePaths": ["spikes/**/bin/**", "spikes/**/obj/**", "artifacts/**", "**/bin/**", "**/obj/**"],
   "words": [
     "ADR", "ADRs", "appdata", "CLSID", "CsWin32", "dbgview", "DPI", "dpiAware", "dpiAwareness", "DWM", "DWMWA",
-    "exFAT", "FTS5", "foldernote", "foldernotes", "HKCR", "HKCU", "HKLM", "HWND", "infotip", "infotips",
+    "exFAT", "FTS5", "foldernote", "foldernotes", "HKCR", "HKCU", "HKLM", "HWND", "infotip", "Infotip", "infotips",
     "LOCALAPPDATA", "Markdig", "MSIX", "MSVC", "MSBuild", "Mvvm", "NFR", "NOACTIVATE", "NTFS", "PIDL",
     "ReFS", "relink", "Serilog", "shellex", "shellext", "Shouldly", "slnx", "subst", "TOOLWINDOW",
-    "unregister", "unregisters", "vcvars", "vswhere", "WinAppSDK", "WinUI", "xunit"
+    "licence", "SHCNE", "UPDATEITEM", "unregister", "unregisters", "vcvars", "vswhere", "WinAppSDK", "WinUI", "xunit"
   ]
 }
