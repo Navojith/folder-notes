@@ -1,0 +1,36 @@
+# 06 — Testing Strategy
+
+Rule: every **M** requirement has at least one automated test or a documented manual check
+(listed in `tests/manual-checklist.md`) before its phase can exit. Test names include the
+requirement ID, e.g. `REQ060_Rename_KeepsNoteAttached`.
+
+## Layers
+
+| Layer | Tooling | Covers |
+|---|---|---|
+| Core unit | xUnit, FluentAssertions, in-memory/temp-file SQLite | repository, validation (REQ-002), labels, search parsing & ranking (REQ-051/052/023), path normalization (REQ-063), migrations |
+| Identity integration | xUnit on real temp folders (NTFS) | rename/move tracking (REQ-060), orphan detection (REQ-061), `OpenFileById` relink |
+| App services | xUnit + fakes | ReminderService due/snooze/once logic (REQ-021/024), autosave debounce (REQ-005), undo (REQ-006), single-instance arg routing |
+| Explorer tracker | Integration tests driving real Explorer (`explorer.exe <path>`, `IShellWindows` navigate) — run locally and on a Windows CI runner with a desktop session | REQ-031 latency, REQ-034 tabs, virtual folders → null |
+| Shell extension | GoogleTest on the DLL's pure functions (path normalize, tooltip formatting, query) + a harness that `CoCreateInstance`s the handler out of Explorer and measures `GetInfoTip` latency | REQ-040/041/042 |
+| UI smoke | FlaUI | add note via `--edit`, search & open, panel shows note |
+| Performance | BenchmarkDotNet + a seeded DB of 10k notes | REQ-041 (<20 ms), REQ-051 (<100 ms), NFR-05 |
+
+## Shared test vectors
+
+`tests/shared/path-normalization-vectors.json` holds input → expected `path_norm` pairs. **Both**
+the C# and C++ normalizers must pass every vector. This keeps the app and the shell extension
+agreeing on lookups.
+
+## Explorer stability (NFR-01)
+
+- **Stress test:** a script hovers 1,000 folders through UI Automation while the app writes notes
+  in a loop. Pass criteria: no Explorer crash, every `GetInfoTip` under 50 ms, and no DLL leaks
+  after `DllCanUnloadNow`.
+- **DB missing / locked / corrupt:** the handler returns `E_FAIL` quickly in each case.
+- Run the handler under Application Verifier (heaps, handles, locks) once per release.
+
+## Manual checklist (maintained in `tests/manual-checklist.md`)
+
+Windows 10 22H2, Windows 11 23H2, Windows 11 24H2 × {100%, 150%, mixed-DPI multi-monitor} ×
+{light, dark, high contrast}: panel docking, snapping, maximize, tabs, toasts, context menu tiers.

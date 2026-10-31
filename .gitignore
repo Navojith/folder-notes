@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+x64/
+ARM64/
+Debug/
+Release/
+*.pdb
+*.ilk
+*.obj
+*.log
+TestResults/
