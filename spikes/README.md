@@ -2,7 +2,7 @@
 
 Throwaway experiments. **Never ship or copy this code into `src/`.** It uses late-bound COM,
 which is banned in production by ADR-007. The *findings* live in the specs:
-`specs/03-data-model.md` (S4) and `specs/04-explorer-integration.md` (S1, S2).
+`specs/03-data-model.md` (S4) and `specs/04-explorer-integration.md` (S1, S2, S3).
 
 | Spike | Run | What it does |
 |---|---|---|

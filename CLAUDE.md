@@ -43,4 +43,5 @@ Code implements the specs; the specs do not describe the code after the fact.
   attribute changes unless the user turns that feature on for a folder.
 - Target: Windows 10 22H2+ and Windows 11. x64 first, ARM64 later.
 - C#: .NET 10 (LTS), Windows App SDK 2.x, nullable enabled, warnings as errors. Typed COM interop
-  only, never `dynamic` (ADR-007). The app ships a PerMonitorV2 `app.manifest` (S2). C++: C++20, `/W4 /WX`, no exceptions crossing COM boundaries.
+  only, never `dynamic` (ADR-007). The app ships a PerMonitorV2 `app.manifest` (S2). 
+- C++: C++20, `/utf-8 /W4 /WX /MT`, no exceptions crossing COM boundaries.
