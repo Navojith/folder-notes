@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.2 Theme + design tokens
+**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.3 Note editor page + compact editor window
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 1 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 2 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -38,7 +38,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T1.6 Search | ✅ | 2026-10-31 | `c0b2edf` | Grammar in 03; 10k benchmark p95 ≤54 ms |
 | T1.7 Export / import JSON | ✅ | 2026-10-31 | `eb44b8e` | Lossless + byte-identical re-export |
 | T2.1 WinUI 3 app skeleton | ✅ | 2026-10-31 | `38116ec` | App.Tests (47); ADR-012 tray; O-11 closed by `UiNoteEvents` |
-| T2.2 Theme + design tokens | ⚪ next | | | Also replace the placeholder icon (`Assets/FolderNotes.ico`) |
+| T2.2 Theme + design tokens | ✅ | 2026-10-31 | _pending_ | ADR-013; 12 colours AA-checked by test; real icon; HC visual check → O-14 |
+| T2.3 Note editor + compact window | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -77,6 +78,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-11 | `NoteChanged` handlers run on the writer task (ADR-011); the app must marshal them to the UI thread | 02 / ADR-011 | T2.1 | **closed** 2026-10-31: `UiNoteEvents` relays via `IUiDispatcher`; UI code subscribes there (02 § App shell) |
 | O-12 | Tray icon comes back after an Explorer restart (`TaskbarCreated`), and has the right size at 150% / mixed DPI | 02 § App shell / ADR-012 | T3.5 manual | open: code path written, not exercised (didn't restart the user's Explorer) |
 | O-13 | Memory after the window closes stays ~23 MB above tray-only (XAML stays loaded). Under target now; recheck once real pages exist | REQ-080 | T5.5 | open |
+| O-14 | High-contrast look of chips, pills and windows (tokens map to system colours; tests check the file, but nobody has seen it on screen) and a live HC toggle re-rendering open chips | 05 § Design tokens | T2.9 manual | open: switching HC changes the user's whole desktop theme, so T2.2 didn't do it |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
 ## Blockers
@@ -102,6 +104,24 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-10-31 (T2.2)
+- **T2.2 done:** `Themes/Tokens.xaml` holds every colour. For each of the 12 palette keys there's
+  an accent, a chip fill and chip text, in Light/Dark/HC, plus the status icon geometry (Fluent
+  System Icons 20 px, MIT) and spacing/shape. Also added: `ThemeTokens` (lookup for run-time
+  keys), `StatusVisuals`, `ThemeService` (System/Light/Dark applied to registered windows and
+  title bars, HC tracking), the `LabelChip` / `StatusPill` controls, and a token sample on the
+  placeholder window. New icon drawn by `eng/make-icon.ps1` (8 sizes, PNG-in-ICO).
+  493/493 tests green in Release (App.Tests 47 → 131).
+- **Spec changes made first:** 05 § Design tokens (keys, how the colours are derived, contrast
+  rules, HC mapping, theme, backdrops, spacing), a T2.2 *Done when* in 07, and ADR-013.
+- **Learned (both found only by running the app):** `AccessibilitySettings.HighContrastChanged`
+  throws `0x80070490` in a desktop app (it needs a CoreWindow), and it took startup down with it.
+  Now HC state comes from `SPI_GETHIGHCONTRAST`, changes come from `UISettings.ColorValuesChanged`,
+  and a failed subscription is logged instead of fatal. Separately, `{StaticResource SpacingXL}`
+  (a Double) can't go into `Padding` (a Thickness); the XAML compiler doesn't catch that, and it
+  only fails when the window loads.
+- **Next:** T2.3 note editor page + compact editor window (use `LabelChip`/`StatusPill` and the tokens).
 
 ### 2026-10-31 (T2.1)
 - **T2.1 done:** custom `Program.Main` with `AppInstance` single-instance redirection,

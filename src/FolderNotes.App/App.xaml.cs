@@ -1,6 +1,7 @@
 using FolderNotes.App.Activation;
 using FolderNotes.App.Services;
 using FolderNotes.App.Shell;
+using FolderNotes.App.Themes;
 using FolderNotes.Core;
 using FolderNotes.Core.Identity;
 using FolderNotes.Core.Search;
@@ -66,7 +67,10 @@ public partial class App : Application
     private async Task StartAsync()
     {
         var ui = DispatcherQueue.GetForCurrentThread();
-        _shell = new AppShell(_log);
+        var uiDispatcher = new DispatcherQueueUiDispatcher(ui);
+        var theme = new ThemeService(new SystemHighContrastSignal(_log), uiDispatcher, _log);
+        ThemeTokens.Service = theme; // T2.8 loads the saved theme setting before any window opens.
+        _shell = new AppShell(theme, _log);
 
         try
         {
@@ -84,7 +88,7 @@ public partial class App : Application
             _shell.StartupError = $"Couldn't open the notes database: {ex.Message}";
         }
 
-        _services = ConfigureServices(ui);
+        _services = ConfigureServices(uiDispatcher, theme);
         _router = _services.GetRequiredService<CommandRouter>();
 
         var tray = _services.GetRequiredService<TrayIcon>();
@@ -99,11 +103,12 @@ public partial class App : Application
         _log.Information("Started in {Ms} ms", (DateTime.Now - System.Diagnostics.Process.GetCurrentProcess().StartTime).TotalMilliseconds);
     }
 
-    private ServiceProvider ConfigureServices(DispatcherQueue ui)
+    private ServiceProvider ConfigureServices(IUiDispatcher ui, ThemeService theme)
     {
         var services = new ServiceCollection();
         services.AddSingleton(_log);
-        services.AddSingleton<IUiDispatcher>(new DispatcherQueueUiDispatcher(ui));
+        services.AddSingleton(ui);
+        services.AddSingleton(theme); // lives as long as the process
         services.AddSingleton(_shell!);
         services.AddSingleton<IAppShell>(_shell!);
         services.AddSingleton<CommandRouter>();

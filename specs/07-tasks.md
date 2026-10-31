@@ -106,8 +106,21 @@ superseded), and specs 03/04 reflect what was learned.
   T2.3/T2.6 add their screens.*
   *Done when:* parser, router and UI-marshalling tests pass; a second launch with `--edit`
   reaches the running instance; the tray menu works; idle memory is under the REQ-080 target.
-- [ ] **T2.2 🧱 Theme + design tokens.** Label palette resources, status icons, Mica, light/dark,
-  high contrast. (REQ-082)
+- [x] **T2.2 🧱 Theme + design tokens.** Label palette resources, status icons, Mica, light/dark,
+  high contrast. (REQ-082, REQ-083 contrast) See 05 § Design tokens.
+  *Done 2026-10-31: `Themes/Tokens.xaml` (12 × 3 tokens × Light/Dark/HC), `ThemeTokens`,
+  `StatusVisuals`, `ThemeService` (ADR-013), `LabelChip` / `StatusPill`, and a token sample on the
+  placeholder main window. 84 new App tests: contrast, HC system colours only, a hex-colour lint,
+  status mapping and the theme service. Checked live: Light/Dark/System switch on a running window
+  (chips and title bar follow) and UIA names "Label: …" / "Status: …". The HC screenshot isn't
+  done: switching to HC changes the whole machine's theme, so it moves to the T2.9 manual pass
+  (O-14). New icon from `eng/make-icon.ps1`.*
+  *Done when:* `Tokens.xaml` defines all 12 palette keys × 3 tokens in Light, Dark and
+  HighContrast; tests verify every chip text ≥ 4.5:1 and every accent ≥ 3:1 (05 rules), that the
+  HC dictionary uses only system colours, and that no other app XAML/C# contains hex colours;
+  `StatusVisuals` covers every status; `LabelChip` / `StatusPill` exist with UIA names;
+  `ThemeService` switches a live window between System/Light/Dark; screenshots of the token
+  sample in light, dark and HC look right; the placeholder icon is replaced.
 - [ ] **T2.3 🧱 Note editor page + compact editor window** (REQ-002…007, 011, 020). Autosave
   indicator and delete with undo. *Done when:* `FolderNotes.exe --edit "C:\Temp\x"` creates and
   edits a note end to end.

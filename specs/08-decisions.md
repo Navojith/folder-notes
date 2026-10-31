@@ -137,3 +137,21 @@ uses no `dynamic` (ADR-007).
 **Consequences:** About 300 lines we own, no extra dependency, and no WinForms runtime loaded
 (which would cost memory). The menu is a classic Win32 menu, not Fluent; that matches what the
 Windows shell does for tray menus and is acceptable for v1.
+
+## ADR-013: Design tokens in XAML theme dictionaries; status icons as Fluent path geometry — *accepted (T2.2, 2026-10-31)*
+
+**Context:** REQ-082/083 need light, dark and high-contrast support with AA contrast for 12 label
+colours, and status icons that look the same on Windows 10 and 11.
+**Options:** colours in C# (computed per theme at run time) vs. XAML `ThemeDictionaries`; icons
+from the Segoe Fluent Icons font (Windows 11 only, Windows 10 has the older MDL2 font with no
+archive glyph) vs. the Fluent System Icons SVG geometry in `PathIcon`s.
+**Decision:** one `Themes/Tokens.xaml` with `Light`/`Dark`/`HighContrast` theme dictionaries is
+the only place colours exist (05 § Design tokens). The values are precomputed (derivation in 05)
+and a unit test parses the file to re-check the contrast rules, so the file can be edited by hand
+without silently breaking AA. Status icons are the 20 px regular Fluent System Icons paths (MIT,
+`@fluentui/svg-icons` 1.1.292), stored as string resources and rendered with `PathIcon`.
+**Consequences:** `{ThemeResource}` switches colours live with no code. Code that needs a token
+for a run-time key (a label's colour) goes through `ThemeTokens`, which reads the dictionary for
+the element's `ActualTheme`. Adding a status or palette colour means editing `Tokens.xaml`, and
+the tests fail until every theme has it. A hex-colour lint test keeps colours out of other files.
+

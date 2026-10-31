@@ -1,4 +1,5 @@
 using FolderNotes.App.Activation;
+using FolderNotes.App.Themes;
 using Microsoft.UI.Windowing;
 using Serilog;
 
@@ -8,8 +9,9 @@ namespace FolderNotes.App;
 /// Owns the main window: created on demand, destroyed on close so the tray process stays light
 /// (REQ-080, specs/02 § App shell). Every member runs on the UI thread.
 /// </summary>
-internal sealed class AppShell(ILogger log) : IAppShell
+internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
 {
+    private readonly ThemeService _theme = theme ?? throw new ArgumentNullException(nameof(theme));
     private readonly ILogger _log = (log ?? throw new ArgumentNullException(nameof(log))).ForContext<AppShell>();
     private MainWindow? _main;
     private string? _startupError;
@@ -42,9 +44,11 @@ internal sealed class AppShell(ILogger log) : IAppShell
     {
         if (_main is null)
         {
-            _main = new MainWindow();
-            _main.Closed += (_, _) =>
+            var window = _main = new MainWindow(_theme);
+            _theme.Register(window);
+            window.Closed += (_, _) =>
             {
+                _theme.Unregister(window);
                 _main = null;
                 _log.Debug("Main window closed; staying in the tray");
             };

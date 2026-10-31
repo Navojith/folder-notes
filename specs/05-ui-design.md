@@ -20,6 +20,60 @@
 - Motion: subtle connected animations between search → note; panel slides in 150 ms (respects
   "Animation effects" off).
 
+## Design tokens (T2.2)
+
+Defined once in `src/FolderNotes.App/Themes/Tokens.xaml` as `ThemeDictionaries` (`Light`,
+`Dark`, `HighContrast`). Every UI surface uses these keys through `{ThemeResource}` (or
+`ThemeTokens` in code for keys built at run time). **No hex colours anywhere else** in app XAML
+or code; a test enforces this.
+
+**Label palette.** For each palette key `k` (03 / `Palette.Keys`) there are three colour tokens,
+each with a matching `…Brush`:
+
+| Token | Used for | Contrast rule (WCAG 2.1, checked by a test) |
+|---|---|---|
+| `LabelAccent.k` | note accent bar, status icon tint, colour dot | ≥ 3:1 against the layer background (light `#F3F3F3` and `#FFFFFF`; dark `#202020`…`#333333`) |
+| `LabelChipBackground.k` | chip / pill fill | — |
+| `LabelChipForeground.k` | chip / pill text and icon | ≥ 4.5:1 against `LabelChipBackground.k` |
+
+Values are derived from the Fluent 2 shared colours (red `#D13438`, orange `#F7630C`, amber
+`#EAA300`, yellow `#FDE300`, lime `#73AA24`, green `#107C10`, teal `#038387`, cyan `#0099BC`,
+blue `#0078D4`, indigo `#5B5FC7`, purple `#8764B8`, pink `#E43BA6`): the light-theme accent is
+darkened and the dark-theme accent lightened until it reaches 3.2:1; the chip fill is the base
+mixed 82% toward white (light) or 72% toward `#202020` (dark); the chip text is the base darkened
+(light) or lightened (dark) until it reaches 5:1.
+
+**High contrast.** In the `HighContrast` dictionary every label token maps to a system colour:
+accent → `SystemColorHighlightColor`, chip fill → `SystemColorWindowColor`, chip text →
+`SystemColorWindowTextColor`, and chips get a 1 px `SystemColorWindowTextColor` border. The
+label's colour is not shown in HC; its name is (05 § Accessibility: colour is never the only signal).
+HC on/off is detected with `SystemParametersInfo(SPI_GETHIGHCONTRAST)` and change notifications come
+from `UISettings.ColorValuesChanged`. (`AccessibilitySettings.HighContrastChanged` needs a
+CoreWindow and throws `0x80070490` in a desktop app, as found in T2.2.) Controls that look tokens
+up in code re-render on `ThemeService.ThemeChanged`.
+
+**Status.** `StatusVisuals` maps each status to its icon, tint key and display text (table in
+§ Visual language). Icons are `PathIcon`s with the **Fluent System Icons** 20 px *regular*
+geometry (MIT) stored as `StatusIcon.<status>` string resources, so they look the same on
+Windows 10, which has no Segoe Fluent Icons font. `none` has no icon and no pill.
+
+**Shared controls.** `LabelChip` (name + palette key; UIA name "Label: *name*") and `StatusPill`
+(status; UIA name "Status: *text*") render from the tokens and are reused by the editor, library,
+panel and search.
+
+**Theme.** `ThemeService` holds the app theme (`System` / `Light` / `Dark`, REQ-081). Every
+window registers with it; the service sets `RequestedTheme` on the window's root element and the
+title-bar theme (`AppWindow.TitleBar.PreferredTheme`) and re-applies when the setting changes.
+`System` follows the Windows app mode live. Persisting the choice is T2.8.
+
+**Backdrops.** Main window and compact editor: `MicaBackdrop`. Panel and search palette:
+`DesktopAcrylicBackdrop`. Both fall back to the solid theme background automatically where
+unsupported (Windows 10, HC, "Transparency effects" off), so the window root stays transparent
+and draws nothing itself.
+
+**Spacing / shape.** `SpacingS` 4, `SpacingM` 8, `SpacingL` 12, `SpacingXL` 16, `SpacingXXL` 24;
+`ChipCornerRadius` 4, `CardCornerRadius` 8 (= `OverlayCornerRadius`); `AccentBarWidth` 4.
+
 ## Screens
 
 ### 1. Companion panel (default 300 px wide, resizable 240–480)

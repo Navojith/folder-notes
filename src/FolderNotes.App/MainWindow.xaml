@@ -3,21 +3,47 @@
     x:Class="FolderNotes.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FolderNotes.App.Controls"
     Title="Folder Notes">
   <Window.SystemBackdrop>
     <MicaBackdrop />
   </Window.SystemBackdrop>
-  <Grid Padding="32">
-    <StackPanel Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
-      <TextBlock Text="Folder Notes" Style="{StaticResource TitleTextBlockStyle}" />
-      <TextBlock Text="App shell (T2.1). The library, editor and search arrive in the next tasks."
-                 Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
-      <!-- Last routed command; lets manual checks and FlaUI see that forwarding worked. -->
-      <TextBlock x:Name="RequestText" AutomationProperties.AutomationId="LastRequest"
-                 AutomationProperties.Name="Last request" Visibility="Collapsed"
-                 Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-      <InfoBar x:Name="ErrorBar" AutomationProperties.AutomationId="StartupError" Severity="Error"
-               Title="Something went wrong" IsClosable="False" IsOpen="False" />
-    </StackPanel>
+  <!-- No Background: Mica (or its solid fallback) shows through (specs/05 § Design tokens, Backdrops). -->
+  <Grid x:Name="Root" Padding="32">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="{StaticResource SpacingM}" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="640">
+        <TextBlock Text="Folder Notes" Style="{StaticResource TitleTextBlockStyle}" />
+        <TextBlock Text="App shell. The library, editor and search arrive in the next tasks."
+                   Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+        <!-- Last routed command; lets manual checks and FlaUI see that forwarding worked. -->
+        <TextBlock x:Name="RequestText" AutomationProperties.AutomationId="LastRequest"
+                   AutomationProperties.Name="Last request" Visibility="Collapsed"
+                   Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+        <InfoBar x:Name="ErrorBar" AutomationProperties.AutomationId="StartupError" Severity="Error"
+                 Title="Something went wrong" IsClosable="False" IsOpen="False" />
+
+        <!-- T2.2 token sample, for visual checks in light/dark/HC. Replaced by the library in T2.4;
+             the theme switch moves to Settings in T2.8. -->
+        <Border Margin="0,16,0,0" Padding="16" CornerRadius="{StaticResource CardCornerRadius}"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                AutomationProperties.AutomationId="TokenSample">
+          <StackPanel Spacing="{StaticResource SpacingL}">
+            <RadioButtons x:Name="ThemeChoice" Header="Theme" MaxColumns="3"
+                          AutomationProperties.AutomationId="ThemeChoice" SelectionChanged="OnThemeChoiceChanged">
+              <x:String>System</x:String>
+              <x:String>Light</x:String>
+              <x:String>Dark</x:String>
+            </RadioButtons>
+            <TextBlock Text="Status" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <StackPanel x:Name="StatusSample" Orientation="Horizontal" Spacing="{StaticResource SpacingS}" />
+            <TextBlock Text="Labels" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <VariableSizedWrapGrid x:Name="LabelSample" Orientation="Horizontal" ItemWidth="92" ItemHeight="28" MaximumRowsOrColumns="6" />
+            <TextBlock Text="Accents" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <StackPanel x:Name="AccentSample" Orientation="Horizontal" Spacing="{StaticResource SpacingM}" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
   </Grid>
 </Window>
