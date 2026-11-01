@@ -73,6 +73,12 @@ public sealed partial class SettingsPage : UserControl
 
             StartupToggle.IsOn = _vm.StartWithWindows;
             Show(StartupError, _vm.StartupError);
+
+            ExplorerCard.Visibility = _vm.HasShellVerbs ? Visibility.Visible : Visibility.Collapsed;
+            ShellVerbToggle.IsOn = _vm.ShellVerbState == Services.ShellVerbState.On;
+            ShellVerbText.Text = _vm.ShellVerbText;
+            ShellVerbRepair.Visibility = _vm.ShellVerbCanRepair ? Visibility.Visible : Visibility.Collapsed;
+            Show(ShellVerbError, _vm.ShellVerbError);
         }
         finally
         {
@@ -171,6 +177,16 @@ public sealed partial class SettingsPage : UserControl
             _vm.SetStartWithWindows(StartupToggle.IsOn);
         }
     }
+
+    private void OnShellVerbToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_syncing && _vm is not null && ShellVerbToggle.IsOn != (_vm.ShellVerbState == Services.ShellVerbState.On))
+        {
+            _vm.SetShellVerbs(ShellVerbToggle.IsOn);
+        }
+    }
+
+    private void OnRepairShellVerbs(object sender, RoutedEventArgs e) => _vm?.RepairShellVerbs();
 
     private void OnManageLabels(object sender, RoutedEventArgs e) => _vm?.ManageLabels();
 

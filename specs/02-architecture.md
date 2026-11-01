@@ -248,6 +248,18 @@ Resolved in T2.1:
   callback that `AppSettings` saves.
 - The tray menu's *Settings* calls `AppShell.ShowSettings()` (main window on the Settings page).
 
+## Explorer context-menu verbs (T3.1, ADR-024)
+
+- **`IShellVerbRegistrar`** (App/Services): `GetState()` (`Off | On | Stale`, read from the registry on every call),
+  `Enable()` (writes both keys for this exe, which is also the repair) and `Disable()` (deletes our `FolderNotes`
+  subkeys). `RegistryShellVerbRegistrar(exePath, classesRoot = "Software\\Classes")` works under `HKCU`; tests pass a
+  scratch root. Errors throw to the caller, which shows them and re-reads the state.
+- **`ShellVerbCommand`**: handles `--register-shell` and `--unregister-shell` at the very top of `Main`, before
+  single-instance redirection and before any XAML, then exits (0 ok, 1 failed). Used by the installer. Nothing else calls
+  `Enable()` apart from the Settings view model; a test checks that `App.xaml.cs` and `AppShell.cs` never do.
+- `SettingsViewModel` takes the registrar (optional parameter) and exposes `ShellVerbState`, `SetShellVerbs(bool)`,
+  `RepairShellVerbs()`, `ShellVerbMessage`.
+
 ## Orphaned page and orphan scan (T2.7)
 
 - **`OrphanScanner`** (Core, 03 § Orphan detection): `Classify(note)` → `FolderCheck(State,

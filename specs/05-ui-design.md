@@ -275,6 +275,12 @@ Settings
   exe. On writes it, off removes it. The app never adds it by itself; the installer turns it on by
   default (T6.1, ADR-022). An entry that points at another copy of the exe counts as on, and the
   app updates it to its own path at startup (the user opted in; the app moved or updated).
+- **Explorer menu (T3.1, ADR-024).** A card *Explorer* with a ToggleSwitch "Folder note in the right-click
+  menu" (on = the verbs for this exe exist). Under it a line of text for the state: Off: "Not in the right-click
+  menu." On: "Right-click a folder, then Folder note… (on Windows 11: Show more options first)." Stale: "Registered
+  for a different copy of Folder Notes (<path>), or incomplete." with a **Repair** button that registers this exe. The
+  state is read from the registry each time the page is shown, never remembered. A failed change shows
+  "Couldn't change this: <reason>" under the toggle, which goes back to the real state. The app never turns this on by itself.
 - **Labels.** *Manage labels* opens the Labels page (REQ-012).
 - **About.** Version (`AppInfo`), "Notes are stored on this PC only." (NFR-03), the data folder path
   (selectable) and *Open data folder* (Explorer).
@@ -282,7 +288,7 @@ Settings
   (T5.1). No placeholders until then.
 - **UIA:** the theme group "Theme"; the shortcut text "Search shortcut, Ctrl + Alt + N"; buttons
   "Change search shortcut", "Reset search shortcut to Ctrl + Alt + N"; the toggle "Start Folder Notes
-  when I sign in to Windows"; messages are polite live regions.
+  when I sign in to Windows", "Folder note in the right-click menu"; button "Repair right-click menu"; messages are polite live regions.
 
 **Remembered across restarts (T2.8):** the theme; the library's sort, view (list/cards) and filters
 (labels that no longer exist are dropped when they're loaded). Selection and window size aren't.

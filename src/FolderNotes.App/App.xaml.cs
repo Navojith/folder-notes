@@ -170,7 +170,8 @@ public partial class App : Application
             var appSettings2 = settings;
             _shell.SettingsFactory = () => new Settings.SettingsViewModel(
                 appSettings2, t => theme.Theme = t, tray, startup, TimeProvider.System, uiDispatcher, _log,
-                typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?", AppInfo.DataDirectory);
+                typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?", AppInfo.DataDirectory,
+                shellVerbs: new RegistryShellVerbRegistrar(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "FolderNotes.exe")));
         }
 
         // Our own args first, then anything a second launch forwarded meanwhile.

@@ -351,3 +351,49 @@ Full shape (T1.7). It's UTF-8, snake_case, and null fields are written out:
   sidecar rule: the import replaces the note only if its `updated_at` is newer. The other policies
   are `Overwrite` and `KeepExisting`. A replaced note keeps its existing `id` and `created_at`.
 - Imported timestamps are kept as they are (not "now").
+
+## Import with preview and snapshot (REQ-070, planned T5.6/T5.7, O-21)
+
+**The file format does not change.** `foldernotes-export/1` stays as above (ADR-023); v1 reading and the
+byte-identical re-export test stay. Only the way import runs changes.
+
+**Two steps in `NotePortability`:**
+1. `PreviewImportAsync(document) -> ImportPlan` is **read-only**: it opens no write transaction and enqueues
+   nothing on the writer (tests compare the database file's bytes before and after). `ImportPlan` has one
+   `PlanItem` per note (`Index`, `Path`, `Kind`: `New | Identical | Conflict | Invalid`, `Reason`, the matched
+   live note for conflicts, a `BindingChange` flag when the imported path differs from the matched note's
+   current `path_display`, `CanKeepBoth`) and one `LabelPlanItem` per label (`New | Same | ColourDiffers`, with both
+   colours). *Identical* means every field the export carries is equal, so re-importing your own backup lists
+   nothing to do. Matching is unchanged (same `path_norm`, else same `id`).
+2. `ApplyImportAsync(plan, resolutions) -> ImportReport`. `resolutions` has a choice per conflict
+   (`KeepMine | TakeImported | KeepBoth`) and per differing label colour (`KeepMine | TakeImported`). A conflict or
+   colour without a choice makes Apply refuse before doing anything. Apply takes the snapshot, then runs one
+   transaction (savepoint per note, as now); any exception rolls back the whole transaction.
+   *Keep both* adds the imported note as new with a fresh id; it is reported as failed (the rest is unaffected)
+   when a live note already holds that exact path. *Take imported* replaces the note, keeping its `id` and
+   `created_at` (the existing rule), and takes the imported binding; the preview already flagged that.
+   The old `ImportAsync(document, policy)` stays as a thin wrapper (preview, then resolve every conflict by the
+   policy) so existing callers and tests keep working. The UI never uses it.
+
+**`ImportReport`** gains counts: `Created`, `Updated`, `KeptMine`, `Duplicated`, `Identical`, `Failed` (index,
+path, reason), plus `SnapshotPath`.
+
+**Snapshot.** `ISnapshotService.CreateAsync(reason)` copies the live database with the SQLite online-backup API
+to `%LOCALAPPDATA%\FolderNotes\backups\notes-pre-import-<UTC yyyyMMddHHmmss>.db` (the folder and mechanism of
+the migration backup; the daily backup, T5.3, uses the same service). It is verified (`PRAGMA integrity_check`
+is `ok` and the note count matches) before Apply continues; if it can't be made, Apply stops and nothing is
+written. Import never deletes snapshots; the daily backup's 7-copy rotation (REQ-084) touches only its own files.
+
+### Restoring a snapshot
+
+If an import turns out wrong (the summary names the snapshot; Settings will have *Open backups folder*):
+1. Quit Folder Notes (tray, Quit). Check in Task Manager that `FolderNotes.exe` is gone.
+2. Open `%LOCALAPPDATA%\FolderNotes\backups` and find the newest `notes-pre-import-<time>.db` from before the import.
+3. In `%LOCALAPPDATA%\FolderNotes`, rename `notes.db` to `notes.db.bad`, and delete `notes.db-wal` and
+   `notes.db-shm` if they exist.
+4. Copy the snapshot to `%LOCALAPPDATA%\FolderNotes\notes.db` (copy, don't move, so the snapshot stays).
+5. Start Folder Notes. Everything is as it was before the import, including labels, colours and folder bindings.
+   Edits made after the import are lost with it; export first if you need them.
+
+The app never restores by itself (replacing the database while the single writer runs isn't safe). A guided
+*Restore from snapshot...* command is a possible later task.

@@ -1,3 +1,4 @@
+using FolderNotes.App.Services;
 using FolderNotes.App.Shell;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -21,6 +22,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // Installer switches (ADR-024): explicit, headless, before anything else starts.
+        if (ShellVerbCommand.TryHandle(args, new RegistryShellVerbRegistrar(Environment.ProcessPath ?? "FolderNotes.exe"), out var shellExit))
+        {
+            return shellExit;
+        }
+
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
         var main = AppInstance.FindOrRegisterForKey(InstanceKey);

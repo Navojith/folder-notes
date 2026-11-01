@@ -267,8 +267,15 @@ smoke tests pass.
 
 ## Phase 3: Explorer: context menu + companion panel (MVP complete)
 
-- [ ] **T3.1 🧱 Tier-1 context menu verbs** (REQ-003, 004), registered and unregistered by the
-  app (HKCU) on first run, from Settings, and on uninstall.
+- [ ] **T3.1 🧱 Tier-1 context menu verbs** (REQ-003, 004, ADR-024). Registered by the installer
+  (`--register-shell`) and removed on uninstall (`--unregister-shell`); the user can turn them on or off,
+  and repair a stale registration, in Settings. **Never automatic** (not on first run, not in dev, test or
+  `perf-check` builds). See 04 § 4.1, 02 § Explorer context-menu verbs.
+  *Done when:* `RegistryShellVerbRegistrar` tests on a scratch registry root cover Off/On/Stale (other exe,
+  one key missing, command missing), enable, disable, repair, idempotence, paths with spaces and non-ASCII, and
+  that nothing outside our keys is touched; a test proves `App.xaml.cs`/`AppShell.cs` never enable the verbs;
+  the CLI switches work; the Settings card shows the real state; a live check on the real HKCU registers, right-click
+  on a folder runs `--edit "<folder>"` through the verb, and unregisters, leaving the registry as found.
 - [ ] **T3.2 🧱 ExplorerTracker service** (REQ-031, 034), production version of S1: STA thread,
   events + polling fallback, Explorer restart recovery.
 - [ ] **T3.3 🧱 PanelDocker** (REQ-030, 033, 038), production version of S2: position modes,
@@ -311,6 +318,21 @@ zero Explorer crashes.
 - [ ] **T5.2 🧱 Sidecar sync** (REQ-071, 072): write, read, conflict dialog.
 - [ ] **T5.3 🧱 Daily DB backup** (REQ-084).
 - [ ] **T5.4 🧱 Markdown preview polish + checkboxes toggle from the panel** (REQ-007).
+- [ ] **T5.6 🧱 Import preview + apply + snapshot, Core** (REQ-070, O-21, ADR-023; after T5.3).
+  Spec first: 03 § Import with preview and snapshot, 01 AC. `PreviewImportAsync` (read-only),
+  `ApplyImportAsync` with per-conflict and per-label-colour resolutions, binding-change flag,
+  `ISnapshotService` (verified), the new `ImportReport`; the old `ImportAsync(policy)` becomes a wrapper.
+  *Done when:* tests prove the preview leaves the database file byte-identical; each choice (keep mine /
+  take imported / keep both) does what 03 says; label colour choices work; a binding change is flagged; Apply
+  without a choice refuses; an injected failure mid-apply leaves the database unchanged; a failed snapshot stops
+  Apply; the snapshot opens and restores per the steps in 03; the v1 lossless and byte-identical round-trip
+  tests are unchanged and green.
+- [ ] **T5.7 🧱 Backup UI: export, import preview, summary** (REQ-070, O-21; after T5.6). A Settings
+  card *Backup*: Export all…, Import…, Open backups folder; the import preview with per-conflict choices,
+  label colour choices, binding-change notes, Apply, and the summary with the snapshot path and the restore
+  steps. Spec first: write 05 § Backup at the start of this task.
+  *Done when:* view-model tests cover the choices and Apply gating; a live check exports, edits, imports with
+  conflicts, and restores the snapshot by following the steps.
 - [ ] **T5.5 ✅ Performance pass** at 10k notes (NFR-02, NFR-05), plus the 120-cycle soak of
   `eng/perf-check.ps1` (REQ-080, NFR-06).
 

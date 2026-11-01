@@ -345,3 +345,35 @@ registered again.
 install from source starts with Windows only after the user turns it on. The settings page shows
 the real registration state, including entries the user removed elsewhere (Task Manager's Startup
 tab).
+
+## ADR-023: Import is preview-then-apply with a snapshot; the export format stays v1 — *accepted (2026-11-01, user decision O-21)*
+
+**Context:** Folder Notes will hold valuable information, so backup and recovery matter. The Core import
+(T1.7) resolves every conflict with one global policy, replaces notes, label colours and folder bindings
+without showing the user, and has no undo. A format v2 (content hashes, app version, checksum) was considered.
+**Decision:** Import becomes two steps: a strictly read-only preview, then an apply with a resolution chosen
+per conflict (keep mine / take imported / keep both) and per differing label colour, after an automatic
+verified snapshot and inside one transaction. Binding changes are flagged in the preview. The file format stays
+`foldernotes-export/1`, with byte-identical re-export and v1 reading kept. Content hashes, app version metadata
+and checksums are not added now; revisit if a requirement needs them. The snapshot is restored by hand (steps
+in 03), not by the app.
+**Consequences:** More Core surface (`ImportPlan`, resolutions, `ISnapshotService`), a Settings UI, and tests
+for the read-only guarantee and rollback. The policy-based `ImportAsync` stays as a wrapper. Scheduled in
+Phase 5 after the daily backup (T5.3), which shares the snapshot mechanism.
+
+## ADR-024: Explorer verbs are registered by the installer; the app only offers a manual toggle — *accepted (T3.1, 2026-11-01, user decision)*
+
+**Context:** The Tier-1 verbs (04 § 4.1) are `HKCU\Software\Classes\Directory\...` keys whose command holds
+the exe path. The task said "on first run". Registering from the app on first launch would also register every
+development, test and `perf-check` build, and leave stale commands in the user's Explorer menu. This extends ADR-022.
+**Decision:** No code path registers the verbs automatically: not on first launch, and not through any switch
+used by tests or `perf-check`. The installer (T6.1) registers them on install and removes them on uninstall
+(through `FolderNotes.exe --unregister-shell` or its own steps). The user can turn them on or off in Settings
+(*Folder note in the right-click menu*). `ShellVerbRegistrar` reports the **actual** state from the registry:
+*Off* (no keys), *On* (both keys, commands match this exe), *Stale* (a key exists whose command points to another
+or a missing exe, or only one of the two keys exists). Settings shows Stale as "Registered for a different copy
+of Folder Notes" with **Repair** (rewrite for this exe) and the toggle off to remove. A failed write is reported
+and the state re-read, never assumed. The app never repairs on its own and only touches the `FolderNotes` key
+under the two `shell` parents.
+**Consequences:** A fresh install from source has no menu entry until the user turns it on; the installer meets
+the original "registered on first run" intent. Tests use a scratch registry root, never the real keys.

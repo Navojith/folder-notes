@@ -137,7 +137,7 @@ attached to the wrong folder or a lost note is not (ADR-020).*
 
 | ID | Pri | Requirement |
 |---|---|---|
-| REQ-070 | M | The user shall be able to export all notes (or a selection) to JSON and import them again, matching by path. |
+| REQ-070 | M | The user shall be able to export all notes (or a selection) to JSON and import them again, matching by path. Import shall show a read-only preview first and change nothing until the user applies it (T5.6/T5.7). |
 | REQ-071 | S | **Where** the user enables "Travel with folder" on a note, the system shall also write a hidden sidecar file `.foldernote.json` in that folder and keep it in sync, so the note survives copying to another machine. |
 | REQ-072 | S | When the app finds a `.foldernote.json` in a folder with no note, the panel shall offer "Import note found in this folder". |
 | REQ-073 | C | Optional mirror to `desktop.ini` `InfoTip` for compatibility with machines that don't have the app. |
@@ -151,6 +151,24 @@ attached to the wrong folder or a lost note is not (ADR-020).*
 | REQ-082 | M | The UI shall follow the system theme and accent color and use Mica/Acrylic backdrops where available. |
 | REQ-083 | M | All UI shall be keyboard-navigable and screen-reader labelled (UIA names), with WCAG AA contrast. |
 | REQ-084 | S | Automatic local backup of the database, daily, keeping the last 7 copies. |
+
+**AC (REQ-070, import with preview; planned T5.6/T5.7, O-21):**
+- *Preview* reads the file and the database and writes nothing: the database file is byte-identical
+  before and after a preview (tested).
+- The preview lists each note as **new**, **identical** (nothing to do), **conflict** or **invalid**
+  (with the reason), and each label as new, same, or **colour differs** (existing vs imported). It says
+  when applying would **change a note's folder binding** (the imported path differs from the matched note's current path).
+- Each conflict is resolved on its own: **Keep mine**, **Take imported** or **Keep both** (the imported
+  note is added as a new note with a new id; refused with the reason when a live note already holds that
+  exact path, since one folder has one note). Conflicts have no pre-selected choice: the user must choose
+  before Apply (a "Keep mine for all remaining" shortcut exists). Each differing label colour is chosen the
+  same way (Keep mine / Take imported); colours are never overwritten silently.
+- **Apply** first takes an automatic, verified database snapshot, then writes everything in one transaction.
+  If the snapshot or any write fails, the database is unchanged (tested with an injected failure) and the
+  error is shown with the snapshot path (if one was made).
+- The **summary** shows created, updated, kept (the user's choice), duplicated (keep both), identical and failed
+  counts, lists the failures with reasons, and links to the snapshot and to the restore steps (03 § Restoring a snapshot).
+- A v1 file from an earlier version still imports, and export, import, export stays byte-identical.
 
 **AC (REQ-080 start with Windows, REQ-081, T2.8):**
 - Every setting is saved when changed and is in effect after a restart; the theme applies before

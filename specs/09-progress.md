@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.1 Tier-1 context menu verbs (T2.9 partial, see O-22)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** finish T3.1 (live Settings card + real right-click), then T3.2 (T2.9 partial, see O-22)
 
 ---
 
@@ -17,7 +17,7 @@ session (see `CLAUDE.md`, workflow step 7).
 | 2 | App shell, editor, search | 🟡 In progress | 8 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
-| 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
+| 5 | Reminders, portability, polish | ⚪ Not started | 0 / 7 | — |
 | 6 | Ship | ⚪ Not started | 0 / 3 | — |
 
 Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
@@ -46,6 +46,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.7 Orphaned view + relink | ✅ | 2026-11-01 | `1665fe1` | ADR-020 (integrity rules), ADR-021 (pages built in code; fixes a T2.6 crash); live UIA check with the real folder picker + `perf-check` |
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
+
+| T3.1 Context menu verbs | 🟡 code + tests done | 2026-11-01 | | ADR-024: installer-only registration (`--register-shell` / `--unregister-shell`), manual toggle + Repair in Settings, never automatic. Real-HKCU registry check passed and left the registry as found. **Open:** Settings card seen on screen and a real right-click; task stays unticked |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -115,7 +117,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 | O-19 | Orphan scan reads full notes (`ListAsync`) to classify them; measure at 10k notes and switch to a binding-only query if it costs (memory or time) | ADR-020 | T5.5 | open |
-| O-21 | JSON export/import (REQ-070, Core done in T1.7) has no UI and no task. **User decision 2026-11-01:** keep as a planned feature (backup/recovery matters). Must cover: all notes + metadata, import of earlier exports, labels/colours/statuses/dates preserved, duplicate/conflict detection, no silent overwrite or data loss. Design (UI, format changes, conflict policy) pending the user's review of the options | 03 § Export format / 07 | design review, then a task in Phase 5 | open (design pending) |
+| O-21 | JSON export/import (REQ-070, Core done in T1.7) had no UI and no task. **Option 1 chosen 2026-11-01 (ADR-023): preview-then-apply with a verified snapshot, format stays v1; spec written (01 AC, 03 § Import with preview and snapshot incl. restore steps); tasks T5.6 (Core) and T5.7 (UI) in Phase 5, after T5.3.** **User decision 2026-11-01:** keep as a planned feature (backup/recovery matters). Must cover: all notes + metadata, import of earlier exports, labels/colours/statuses/dates preserved, duplicate/conflict detection, no silent overwrite or data loss. | 03 § Import with preview / 07 | T5.6, T5.7 | open (specified, not built) |
 | O-22 | T2.9 outstanding acceptance criteria (**user decision 2026-11-01**): Accessibility Insights FastPass on every app window; manual keyboard walk; screen-reader pass; high-contrast look (O-14). Controls having names is not enough: real usability with assistive tech counts. Does not block other development; T2.9 stays unticked until all are done | 07 T2.9 / 05 § Accessibility | before Phase 6 at the latest | open |
 | O-20 | Relinking many notes after a parent folder moved to another drive is one *Relink…* per note; a "relink the others under the same parent" helper could come later (not in v1 scope) | 05 § Orphaned page | post-v1 / user's call | open |
 
@@ -142,6 +144,13 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T3.1 + O-21 decisions)
+- **Specs first:** ADR-023 (import is preview-then-apply, snapshot, format stays v1), ADR-024 (verbs are registered by the installer only); 01 AC and 03 § Import with preview and snapshot (with the manual restore steps); T5.6/T5.7 in 07; 04 § 4.1, 02 § Explorer context-menu verbs, 05 § Settings page.
+- **T3.1 code:** `IShellVerbRegistrar` / `RegistryShellVerbRegistrar` (Off/On/Stale read from the registry each time), `ShellVerbCommand` (`--register-shell`, `--unregister-shell`, handled first in `Main`), the Settings *Explorer* card (toggle, state text, Repair, errors). Nothing registers by itself; a test guards `App.xaml.cs` and `AppShell.cs`. 334 App tests green (Core 396).
+- **Checked on the real HKCU:** before: no keys; `--register-shell` wrote both with the right command and icon (exit 0); `--unregister-shell` removed both (exit 0); no FolderNotes process left. Not checked: the Settings card on screen, a real right-click.
+- **Found:** two test classes sharing one scratch registry root made a parallel test fail once; each class has its own root now.
+- **Next:** live-check the Settings card and a real right-click, then tick T3.1.
 
 ### 2026-11-01 (T2.9, partial)
 - **Done:** `UiaNamesTests` checks every interactive XAML element has a name; it found one gap (the

@@ -213,8 +213,52 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    private readonly FakeShellVerbs _verbs = new();
+
     private SettingsViewModel Create(Func<string, bool>? open = null) =>
-        new(_settings, _applied.Add, _hotkeys, _startup, _clock, new InlineDispatcher(), Logger.None, "0.1.0", @"C:\Data\FolderNotes", open);
+        new(_settings, _applied.Add, _hotkeys, _startup, _clock, new InlineDispatcher(), Logger.None, "0.1.0", @"C:\Data\FolderNotes", open, _verbs);
+
+    [Fact]
+    public void ADR024_ShellVerbs_ShowTheRealState_AndNeverAssumeSuccess()
+    {
+        using var vm = Create();
+        vm.HasShellVerbs.ShouldBeTrue();
+        vm.ShellVerbState.ShouldBe(ShellVerbState.Off); // read at creation; the app never turned it on
+        _verbs.EnableCalls.ShouldBe(0);
+
+        vm.SetShellVerbs(true);
+        vm.ShellVerbState.ShouldBe(ShellVerbState.On);
+        vm.ShellVerbError.ShouldBeNull();
+
+        _verbs.Fail = true;
+        vm.SetShellVerbs(false);
+        vm.ShellVerbError.ShouldBe("Couldn't change this: denied");
+        vm.ShellVerbState.ShouldBe(ShellVerbState.On); // still registered: the page goes back to it
+
+        _verbs.Fail = false;
+        vm.SetShellVerbs(false);
+        vm.ShellVerbState.ShouldBe(ShellVerbState.Off);
+        vm.ShellVerbError.ShouldBeNull();
+    }
+
+    [Fact]
+    public void ADR024_StaleRegistration_ShowsWhereItPoints_AndRepairRewritesIt()
+    {
+        _verbs.State = ShellVerbState.Stale;
+        _verbs.Exe = @"C:\Old\FolderNotes.exe";
+        using var vm = Create();
+
+        vm.ShellVerbCanRepair.ShouldBeTrue();
+        vm.ShellVerbText.ShouldContain(@"C:\Old\FolderNotes.exe");
+
+        vm.RepairShellVerbs();
+        vm.ShellVerbState.ShouldBe(ShellVerbState.On);
+        vm.ShellVerbCanRepair.ShouldBeFalse();
+
+        _verbs.State = ShellVerbState.Off;
+        vm.Refresh(); // a state changed outside the app shows up on the next Refresh
+        vm.ShellVerbState.ShouldBe(ShellVerbState.Off);
+    }
 
     [Fact]
     public async Task REQ081_Theme_AppliesAndSaves_AFailedSaveGoesBack()
@@ -405,6 +449,26 @@ public sealed class SettingsViewModelTests : IAsyncLifetime
             Registered = gesture;
             return true;
         }
+    }
+
+    private sealed class FakeShellVerbs : IShellVerbRegistrar
+    {
+        public ShellVerbState State { get; set; }
+        public string? Exe { get; set; }
+        public bool Fail { get; set; }
+        public int EnableCalls { get; private set; }
+
+        public ShellVerbState GetState() => State;
+
+        public void Enable()
+        {
+            EnableCalls++;
+            State = !Fail ? ShellVerbState.On : throw new UnauthorizedAccessException("denied");
+        }
+
+        public void Disable() => State = !Fail ? ShellVerbState.Off : throw new UnauthorizedAccessException("denied");
+
+        public string? RegisteredExe() => Exe;
     }
 
     private sealed class FakeStartup : IStartupRegistration

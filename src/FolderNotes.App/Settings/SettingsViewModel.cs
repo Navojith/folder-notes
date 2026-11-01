@@ -18,6 +18,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly Action<AppTheme> _applyTheme;
     private readonly IHotkeyHost _hotkeys;
     private readonly IStartupRegistration _startup;
+    private readonly IShellVerbRegistrar? _shellVerbs;
     private readonly TimeProvider _clock;
     private readonly IUiDispatcher _ui;
     private readonly ILogger _log;
@@ -35,8 +36,10 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         ILogger log,
         string version,
         string dataFolder,
-        Func<string, bool>? openFolder = null)
+        Func<string, bool>? openFolder = null,
+        IShellVerbRegistrar? shellVerbs = null)
     {
+        _shellVerbs = shellVerbs;
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _applyTheme = applyTheme ?? throw new ArgumentNullException(nameof(applyTheme));
         _hotkeys = hotkeys ?? throw new ArgumentNullException(nameof(hotkeys));
@@ -257,6 +260,100 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         StartWithWindows = SafeIsEnabled();
     }
 
+    // ───────────── Explorer menu (T3.1, ADR-024) ─────────────
+
+    /// <summary>False when no registrar was given (the section is hidden).</summary>
+    public bool HasShellVerbs => _shellVerbs is not null;
+
+    [ObservableProperty]
+    internal partial ShellVerbState ShellVerbState { get; private set; }
+
+    [ObservableProperty]
+    public partial string? ShellVerbError { get; private set; }
+
+    /// <summary>The line under the toggle (05 § Settings page).</summary>
+    public string ShellVerbText => ShellVerbState switch
+    {
+        ShellVerbState.On => "Right-click a folder, then Folder note… (on Windows 11: Show more options first).",
+        ShellVerbState.Stale => "Registered for a different copy of Folder Notes (" + (SafeRegisteredExe() ?? "unknown") + "), or incomplete.",
+        _ => "Not in the right-click menu.",
+    };
+
+    public bool ShellVerbCanRepair => ShellVerbState == ShellVerbState.Stale;
+
+    public void SetShellVerbs(bool on) => ChangeShellVerbs(on, on ? "Enable" : "Disable");
+
+    public void RepairShellVerbs() => ChangeShellVerbs(true, "Repair");
+
+    private void ChangeShellVerbs(bool on, string what)
+    {
+        if (_shellVerbs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (on)
+            {
+                _shellVerbs.Enable();
+            }
+            else
+            {
+                _shellVerbs.Disable();
+            }
+
+            ShellVerbError = null;
+            _log.Information("Explorer menu: {Action}", what);
+        }
+#pragma warning disable CA1031 // Shown under the toggle, which goes back to the real state (05).
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Changing the Explorer menu failed ({Action})", what);
+            ShellVerbError = "Couldn't change this: " + ex.Message;
+        }
+
+        RefreshShellVerbs();
+    }
+
+    private void RefreshShellVerbs()
+    {
+        if (_shellVerbs is null)
+        {
+            return;
+        }
+
+        try
+        {
+            ShellVerbState = _shellVerbs.GetState();
+        }
+#pragma warning disable CA1031 // A registry read failure shows as "off".
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Reading the Explorer menu registration failed");
+            ShellVerbState = ShellVerbState.Off;
+        }
+
+        OnPropertyChanged(nameof(ShellVerbText));
+        OnPropertyChanged(nameof(ShellVerbCanRepair));
+    }
+
+    private string? SafeRegisteredExe()
+    {
+        try
+        {
+            return _shellVerbs?.RegisteredExe();
+        }
+#pragma warning disable CA1031 // Display only.
+        catch (Exception)
+#pragma warning restore CA1031
+        {
+            return null;
+        }
+    }
+
     // ───────────── labels, about ─────────────
 
     public string Version { get; }
@@ -278,6 +375,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ? null
             : $"{saved.DisplayText} couldn't be registered: another app uses it. Choose another, or close that app and restart Folder Notes.";
         StartWithWindows = SafeIsEnabled();
+        RefreshShellVerbs();
     }
 
     private bool SafeIsEnabled()

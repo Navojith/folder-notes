@@ -20,6 +20,20 @@ HKCU\Software\Classes\Directory\Background\shell\FolderNotes   ← right-click e
 ```
 On Windows 11 this appears under "Show more options". That's acceptable for the MVP.
 
+**Who writes these keys (T3.1, ADR-024).** Never the app by itself: not on first launch, not in development,
+test or `perf-check` builds. Three explicit routes only:
+- the **installer** (T6.1) on install, through `FolderNotes.exe --register-shell`, and on uninstall through
+  `--unregister-shell` (both headless: they write or remove the keys, print nothing and exit 0, or 1 on failure);
+- the user, with the Settings toggle *Folder note in the right-click menu* (05 § Settings page);
+- a Settings **Repair** when the registration points at another copy.
+
+`ShellVerbRegistrar` reports the actual state from the registry: **Off** (neither key), **On** (both keys,
+command and icon equal what this exe would write), **Stale** (anything else under our `FolderNotes` keys: another
+exe path, a moved or deleted exe, a missing command, or only one of the two keys). The app only reads at startup
+and shows the state in Settings; it never rewrites a Stale registration by itself. It only creates or deletes the
+`FolderNotes` key under the two `shell` parents and leaves everything else in `Classes` alone. Paths with spaces
+and non-ASCII characters are quoted; the folder argument is `"%V"`.
+
 **Tier 2 (Phase 4b):** an `IExplorerCommand` implementation in `FolderNotes.ShellExt.dll`,
 registered through a **sparse MSIX package** (`desktop4:FileExplorerContextMenus`,
 `desktop5:ItemType Type="Directory"`), so it appears in the Windows 11 top-level menu. The label
