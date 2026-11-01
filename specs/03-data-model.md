@@ -209,6 +209,9 @@ A database with a *newer* version than the app knows is opened read-only and rep
 - Upserting a soft-deleted note fails. Restore it first.
 - Restore fails with `DuplicateFolderNoteException` if another live note has taken the folder in the meantime.
 - Soft-deleted notes are purged 30 days after `deleted_at` (`PurgeDeletedAsync`).
+- **Label usage** (`CountNotesByLabelAsync`, T2.5) counts live notes per label (orphaned included,
+  soft-deleted not); a label on no live note is missing from the result (= 0). Deleting a label
+  removes it from every note, soft-deleted ones included (the `note_labels` cascade).
 - **Path sort is hierarchical** (`NoteSort.Path`, REQ-054, O-9): it orders by `path_norm` with every
   `\` replaced by `char(1)`, so a folder's subfolders come right after it and before any sibling
   whose name merely starts the same (`D:\CLIENTS\ACME` before `D:\CLIENTSOLD`). Ties go by `id`.

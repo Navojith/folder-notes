@@ -22,15 +22,18 @@ public sealed partial class MainWindow : Window, IThemeTarget
     private bool _syncingChoice;
     private bool _closingForGood;
 
-    internal MainWindow(ThemeService theme, LibraryViewModel? library, ILogger log)
+    internal MainWindow(ThemeService theme, LibraryViewModel? library, Labels.LabelsViewModel? labels, ILogger log)
     {
         _theme = theme ?? throw new ArgumentNullException(nameof(theme));
         _log = (log ?? throw new ArgumentNullException(nameof(log))).ForContext<MainWindow>();
         LibraryViewModel = library;
+        LabelsViewModel = labels;
         InitializeComponent();
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "FolderNotes.ico"));
         AppWindow.Resize(Scale(LogicalWidth, LogicalHeight));
         Library.ViewModel = library;
+        LabelsPage.ViewModel = labels;
+        LabelsPage.ShowNotesRequested += OnShowNotesRequested;
         Library.Visibility = library is null ? Visibility.Collapsed : Visibility.Visible;
         Nav.SelectedItem = AllNotesItem;
         AppWindow.Closing += OnClosing;
@@ -40,6 +43,8 @@ public sealed partial class MainWindow : Window, IThemeTarget
     internal event EventHandler? Hidden;
 
     internal LibraryViewModel? LibraryViewModel { get; }
+
+    internal Labels.LabelsViewModel? LabelsViewModel { get; }
 
     internal bool IsShown => AppWindow.IsVisible;
 
@@ -125,11 +130,48 @@ public sealed partial class MainWindow : Window, IThemeTarget
         Hidden?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnNavSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    private async void OnNavSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        var settings = ReferenceEquals(args.SelectedItem, SettingsItem);
-        SettingsPage.Visibility = settings ? Visibility.Visible : Visibility.Collapsed;
-        Library.Visibility = !settings && LibraryViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        var page = args.SelectedItem;
+        SettingsPage.Visibility = ReferenceEquals(page, SettingsItem) ? Visibility.Visible : Visibility.Collapsed;
+        Library.Visibility = ReferenceEquals(page, AllNotesItem) && LibraryViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        LabelsPage.Visibility = ReferenceEquals(page, LabelsItem) && LabelsViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (ReferenceEquals(page, LabelsItem) && LabelsViewModel is { } labels)
+        {
+            try
+            {
+                await labels.ActivateAsync();
+            }
+#pragma warning disable CA1031 // Shown in the window rather than crashing the tray.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                _log.Error(ex, "Loading the Labels page failed");
+                ShowError($"Couldn't load the labels: {ex.Message}");
+            }
+        }
+    }
+
+    // "Show notes" on the Labels page: All notes, filtered to that label alone (05 § Labels page).
+    private async void OnShowNotesRequested(object? sender, string labelName)
+    {
+        if (LibraryViewModel is not { } library)
+        {
+            return;
+        }
+
+        ShowLibrary();
+        try
+        {
+            await library.ShowOnlyLabelAsync(labelName);
+        }
+#pragma warning disable CA1031 // See OnNavSelectionChanged.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Filtering the library by {Label} failed", labelName);
+            ShowError($"Couldn't show the notes: {ex.Message}");
+        }
     }
 
     private void OnThemeChoiceChanged(object sender, SelectionChangedEventArgs e)

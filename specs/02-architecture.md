@@ -193,6 +193,21 @@ Resolved in T2.1:
   the compact editor's.
 - `AppShell.OpenNote(id)` shows the main window and calls `LibraryViewModel.SelectAsync(id)`.
 
+## Labels page (T2.5)
+
+- **`LabelsViewModel`** (no XAML types): the label rows (`LabelItem`: label, usage, edit state,
+  error), the new-label form, and create / rename / recolour / delete through `ILabelRepository`.
+  Dependencies: `ILabelRepository`, `INoteEvents`, `ILogger`. Reloads are coalesced like the
+  library's. It lives as long as the main window.
+- Usage comes from `ILabelRepository.CountNotesByLabelAsync()`: one `GROUP BY` over
+  `note_labels` joined to live notes.
+- **Open editors follow label changes (ADR-018):** `NoteEditorViewModel.RefreshLabelsAsync()`
+  reloads the label list, replaces each label on the note with its current version and drops the
+  ones that no longer exist, without marking the note dirty. `LibraryViewModel` calls it for its
+  detail editor and `AppShell` for every compact editor, on `INoteEvents.LabelsChanged`.
+- "Show notes" calls `LibraryViewModel.ShowOnlyLabelAsync(name)` and switches the main window to
+  All notes.
+
 ## Markdown (REQ-007)
 
 `MarkdownModel.Parse(string)` (Markdig 1.4, task lists + auto-links, HTML not rendered) turns the
@@ -224,6 +239,7 @@ public interface ILabelRepository {                  // REQ-010, 012, 013
     Task<Label> CreateLabelAsync(string name, string color, CancellationToken ct = default);
     Task<Label> UpdateLabelAsync(Label label, CancellationToken ct = default); // rename/recolor
     Task DeleteLabelAsync(Guid id, CancellationToken ct = default);
+    Task<IReadOnlyDictionary<Guid, int>> CountNotesByLabelAsync(CancellationToken ct = default); // live notes per label (T2.5)
     event EventHandler LabelsChanged;
 }
 // Both are implemented by SqliteNoteStore (FolderNotes.Core.Storage). OrphanScanner runs the

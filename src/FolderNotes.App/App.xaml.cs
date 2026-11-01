@@ -103,6 +103,8 @@ public partial class App : Application
             var events = _services.GetRequiredService<UiNoteEvents>();
             var editors = _shell.EditorFactory!;
             _shell.LibraryFactory = () => new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
+            _shell.LabelsFactory = () => new Labels.LabelsViewModel(store, events, _log);
+            _shell.NoteEvents = events;
         }
 
         _router = _services.GetRequiredService<CommandRouter>();

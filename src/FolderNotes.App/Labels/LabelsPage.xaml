@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Labels page (specs/05 § Labels page, REQ-012/013). -->
+<UserControl
+    x:Class="FolderNotes.App.Labels.LabelsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FolderNotes.App.Controls"
+    xmlns:local="using:FolderNotes.App.Labels">
+  <UserControl.Resources>
+    <DataTemplate x:Key="LabelTemplate" x:DataType="local:LabelItem">
+      <Grid ColumnSpacing="12" RowSpacing="4" Padding="0,6" AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="220" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <controls:LabelChip LabelName="{x:Bind Name, Mode=OneWay}" ColorKey="{x:Bind Color, Mode=OneWay}"
+                            HorizontalAlignment="Left" VerticalAlignment="Center"
+                            Visibility="{x:Bind local:LabelsPage.Hidden(IsEditing), Mode=OneWay}" />
+        <TextBox x:Name="RenameBox" x:Load="{x:Bind IsEditing, Mode=OneWay}" Tag="{x:Bind}"
+                 Text="{x:Bind EditName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" MaxLength="80"
+                 AutomationProperties.Name="{x:Bind local:LabelsPage.RenameBoxName(Name), Mode=OneWay}"
+                 Loaded="OnRenameBoxLoaded" KeyDown="OnRenameKeyDown" LostFocus="OnRenameLostFocus" />
+
+        <TextBlock Grid.Column="1" Text="{x:Bind UsageText, Mode=OneWay}" VerticalAlignment="Center"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+          <HyperlinkButton Content="Show notes" Tag="{x:Bind}" Click="OnShowNotes"
+                           Visibility="{x:Bind IsUsed, Mode=OneWay}"
+                           AutomationProperties.Name="{x:Bind local:LabelsPage.ActionName('Show notes with', Name), Mode=OneWay}" />
+          <Button Tag="{x:Bind}" Click="OnRename" AutomationProperties.Name="{x:Bind local:LabelsPage.ActionName('Rename', Name), Mode=OneWay}"
+                  ToolTipService.ToolTip="Rename">
+            <SymbolIcon Symbol="Rename" />
+          </Button>
+          <Button Tag="{x:Bind}" Click="OnColour" AutomationProperties.Name="{x:Bind local:LabelsPage.ActionName('Colour of', Name), Mode=OneWay}"
+                  ToolTipService.ToolTip="Colour">
+            <controls:ColorSwatch ColorKey="{x:Bind Color, Mode=OneWay}" />
+          </Button>
+          <Button Tag="{x:Bind}" Click="OnDelete" AutomationProperties.Name="{x:Bind local:LabelsPage.ActionName('Delete', Name), Mode=OneWay}"
+                  ToolTipService.ToolTip="Delete">
+            <SymbolIcon Symbol="Delete" />
+          </Button>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{x:Bind Error, Mode=OneWay}" TextWrapping="Wrap"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                   Visibility="{x:Bind local:LabelsPage.HasText(Error), Mode=OneWay}" />
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid Padding="24,16,24,0" RowSpacing="{StaticResource SpacingL}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+    <StackPanel Orientation="Horizontal" Spacing="12">
+      <TextBlock Text="Labels" Style="{StaticResource SubtitleTextBlockStyle}" />
+      <TextBlock x:Name="CountText" AutomationProperties.AutomationId="LabelCount" VerticalAlignment="Bottom" Margin="0,0,0,3"
+                 Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </StackPanel>
+
+    <!-- New label -->
+    <Border Grid.Row="1" Padding="16,12" MaxWidth="900" HorizontalAlignment="Left" CornerRadius="{StaticResource CardCornerRadius}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderThickness="1"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+      <StackPanel Spacing="{StaticResource SpacingS}">
+        <TextBlock Text="New label" Style="{StaticResource BodyStrongTextBlockStyle}" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBox x:Name="NewNameBox" Width="280" PlaceholderText="Name" MaxLength="80"
+                   AutomationProperties.AutomationId="NewLabelName" AutomationProperties.Name="New label name"
+                   TextChanged="OnNewNameChanged" KeyDown="OnNewNameKeyDown" />
+          <Button x:Name="NewColorButton" AutomationProperties.AutomationId="NewLabelColour" Click="OnNewColour">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <controls:ColorSwatch x:Name="NewColorSwatch" />
+              <TextBlock x:Name="NewColorText" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button x:Name="AddButton" Content="Add" Style="{StaticResource AccentButtonStyle}"
+                  AutomationProperties.AutomationId="AddLabel" Click="OnAdd" />
+        </StackPanel>
+        <TextBlock x:Name="NewErrorText" AutomationProperties.AutomationId="NewLabelError" Visibility="Collapsed" TextWrapping="Wrap"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+      </StackPanel>
+    </Border>
+
+    <ListView x:Name="LabelList" Grid.Row="2" MaxWidth="900" HorizontalAlignment="Left" SelectionMode="None"
+              AutomationProperties.AutomationId="LabelList" AutomationProperties.Name="Labels"
+              ItemTemplate="{StaticResource LabelTemplate}" Padding="0,0,0,16">
+      <ListView.ItemContainerStyle>
+        <Style TargetType="ListViewItem">
+          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+      </ListView.ItemContainerStyle>
+    </ListView>
+  </Grid>
+</UserControl>

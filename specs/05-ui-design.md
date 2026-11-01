@@ -180,15 +180,58 @@ the main window's detail pane reuses it in T2.4.
   in the middle), status, labels, next date and updated time. Sort and filter commands are in a
   CommandBar.
 - **Due & reminders**: overdue, next 30 days, later.
-- **Labels**: a label manager (REQ-012).
+- **Labels**: a label manager (REQ-012). See § Labels page.
 - **Orphaned**: notes whose folders can't be found, with Relink… / Delete (REQ-061).
 - **Settings** (REQ-081).
 - The list and editor use a master/detail layout above 1000 px width and stack below it.
 
+#### Labels page (T2.5)
+
+The **Labels** item sits under *All notes* in the navigation rail (REQ-012 says "Settings →
+Labels"; resolved as its own page, and the Settings page links to it in T2.8).
+
+```
+Labels  6 labels
+┌ New label ─────────────────────────────────────────────┐
+│ [ name…                ]  [● orange ▾]  [Add]          │
+└────────────────────────────────────────────────────────┘
+[client]          Used by 3 notes   Show notes  ✎ Rename  ● Colour ▾  🗑 Delete
+[do-not-delete]   Used by 1 note    Show notes  ✎ Rename  ● Colour ▾  🗑 Delete
+[e2e-label]       Not used                      ✎ Rename  ● Colour ▾  🗑 Delete
+```
+
+- **List.** Every label, sorted by name (ignoring case), as a chip (the live preview of its
+  colour) with its usage, "Used by N notes" / "Used by 1 note" / "Not used". Usage counts live
+  notes, orphaned ones included, not soft-deleted ones.
+- **New label.** A name box, a colour picker preset to the palette colour used by the fewest
+  labels (ties go to palette order, the editor's rule, `Palette.LeastUsed`), and [Add] (also
+  Enter). The name is trimmed. Errors show under the box: the label rules (`label.*`) and "A label
+  named '<name>' already exists." Typing clears the error. After adding, the box clears and the
+  next least-used colour is preset.
+- **Rename.** [Rename] turns the name into a text box (focused, all selected). Enter or leaving
+  the box saves; Esc cancels. A change of case only is a rename. A name that another label has
+  is refused with the same message (labels aren't merged in v1). Errors show under that row,
+  which stays in edit mode. Every note shows the new name (REQ-012).
+- **Colour.** A drop-down with the 12 palette swatches (UIA name = colour key, the current one
+  checked); picking one saves.
+- **Delete.** Asks first (ContentDialog "Delete label '<name>'?" with "It will be removed from N
+  notes." when used · Delete / Cancel). There's no undo: the label is removed from every note.
+- **Show notes** (only when used) opens *All notes* filtered to that label alone (other filters
+  cleared).
+- **Starter labels (REQ-013)** look and behave like any other label. They're only created with a
+  new database, so a deleted starter label doesn't come back.
+- **Keeping in sync.** The page reloads (coalesced, like the library) on any label change and on
+  any note change (usage counts). Open editors (the compact windows and the library's detail pane)
+  refresh their labels on every label change: a renamed or recoloured label shows its new look,
+  and a deleted one is dropped from the editor without counting as an edit, so a later autosave
+  can't bring it back (ADR-018).
+- **UIA:** rows are named "Label <name>, used by N notes"; the buttons are named "Rename <name>",
+  "Colour of <name>", "Delete <name>", "Show notes with <name>".
+
 #### Library behaviour (T2.4)
 
 `MainWindow` hosts a `NavigationView` (left, `PaneDisplayMode=Auto`). Items appear when their task
-lands: **All notes** (T2.4), Labels (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
+lands: **All notes** (T2.4), **Labels** (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
 footer **Settings** (T2.8). Until T2.8 the Settings page holds only the Theme choice that the
 T2.2 token sample had (System / Light / Dark, not saved across restarts). The token sample is gone.
 

@@ -58,7 +58,7 @@ hides the badge (REQ-022).
 |---|---|---|
 | REQ-010 | M | Labels shall be global (shared across notes), each with a name (unique, case-insensitive) and a color from a fixed palette of 12 Fluent-friendly colors. |
 | REQ-011 | M | The editor shall offer label autocomplete and allow creating a new label inline. |
-| REQ-012 | M | The user shall be able to rename, recolor and delete labels from Settings → Labels. Renaming updates every note. |
+| REQ-012 | M | The user shall be able to rename, recolor and delete labels from the **Labels** page of the main window (Settings links to it, T2.8). Renaming updates every note. |
 | REQ-013 | S | Built-in starter labels: `client`, `build-output`, `archive`, `personal`, `do-not-delete`. All of them are editable. |
 
 ## C. Dates & reminders

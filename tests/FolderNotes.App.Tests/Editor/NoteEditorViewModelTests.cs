@@ -408,6 +408,67 @@ public sealed class NoteEditorViewModelTests : IAsyncLifetime
         vm.SaveState.ShouldBe(SaveState.Pending);
     }
 
+    // ───────────── labels changed elsewhere (ADR-018) ─────────────
+
+    [Fact]
+    public async Task ADR018_RenamedLabel_ShowsInAnOpenEditor_WithoutAnEdit()
+    {
+        await _store.UpsertAsync(Note.CreateFor(_identity.Resolve(_folder)) with { Labels = [Label.Create("client", "blue")] }, Ct);
+        using var vm = await OpenFolderAsync();
+        var client = vm.Labels.Single();
+
+        await _store.UpdateLabelAsync(client with { Name = "customer", Color = "teal" }, Ct);
+        await vm.RefreshLabelsAsync();
+
+        vm.Labels.Single().ShouldBe(client with { Name = "customer", Color = "teal" });
+        vm.SaveState.ShouldBe(SaveState.None); // not an edit
+        vm.SuggestLabels("cus").ShouldNotContain(s => s.Existing != null); // "customer" is on the note already
+    }
+
+    [Fact]
+    public async Task ADR018_DeletedLabel_IsDropped_AndAutosaveDoesNotBringItBack()
+    {
+        await _store.UpsertAsync(Note.CreateFor(_identity.Resolve(_folder)) with { Labels = [Label.Create("temp", "red"), Label.Create("client", "blue")] }, Ct);
+        using var vm = await OpenFolderAsync();
+        var temp = vm.Labels.Single(l => l.Name == "temp");
+
+        await _store.DeleteLabelAsync(temp.Id, Ct);
+        await vm.RefreshLabelsAsync();
+        vm.Labels.Select(l => l.Name).ShouldBe(["client"]);
+        vm.SaveState.ShouldBe(SaveState.None);
+
+        vm.Title = "edited after the delete";
+        await vm.FlushAsync();
+
+        (await _store.ListLabelsAsync(Ct)).ShouldNotContain(l => l.Name == "temp");
+        (await StoredAsync())!.Labels.Select(l => l.Name).ShouldBe(["client"]);
+    }
+
+    [Fact]
+    public async Task ADR018_ExistingLabelAddedButNotSaved_IsDroppedWhenDeleted()
+    {
+        using var vm = await OpenFolderAsync();
+        vm.AddLabel("personal").ShouldBeTrue(); // a starter label
+        var personal = vm.Labels.Single();
+
+        await _store.DeleteLabelAsync(personal.Id, Ct);
+        await vm.RefreshLabelsAsync();
+
+        vm.Labels.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ADR018_InlineLabelNotSavedYet_IsKept()
+    {
+        using var vm = await OpenFolderAsync();
+        vm.AddLabel("brand-new").ShouldBeTrue();
+
+        await vm.RefreshLabelsAsync();
+
+        vm.Labels.Select(l => l.Name).ShouldBe(["brand-new"]);
+        vm.SaveState.ShouldBe(SaveState.Pending); // the add itself is still pending
+    }
+
     // ───────────── helpers ─────────────
 
     private NoteEditorViewModel NewVm(INoteRepository? notes = null) =>

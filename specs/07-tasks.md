@@ -155,7 +155,25 @@ superseded), and specs 03/04 reflect what was learned.
   "Saved" and the row updated in place, cards, the narrow layout's Back, `--open-note` clearing a
   hiding filter, reopen keeps state on the same window, and two `--edit` of a missing folder →
   one window (O-17). `perf-check` (8 editor + 8 main-window cycles) passes: tray-only 32.5 MB; editor open ≤ 68.1 MB; main window with the library ≤ 81.8 MB open and ≤ 81.4 MB after close; no growth (-0.8 / -2.8 MB); idle CPU 0 %.*
-- [ ] **T2.5 🧱 Labels manager** (REQ-012, 013).
+- [x] **T2.5 🧱 Labels manager** (REQ-012, 013). See 05 § Labels page, 02 § Labels page, ADR-018.
+  *Done when:* view-model tests cover the list and usage, create (least-used colour, trimming,
+  rule and duplicate errors), rename (case-only, duplicate refused, errors keep edit mode),
+  recolour, delete, reload on label and note changes, and Show notes; a Core test covers
+  `CountNotesByLabelAsync`; editor tests show a renamed label updated and a deleted one dropped
+  without an autosave bringing it back; checked live on Release (create, rename, recolour, delete,
+  Show notes, an open detail editor following a rename and a delete) and `eng/perf-check.ps1`
+  passes.
+  *Done 2026-11-01: `LabelsViewModel` / `LabelItem`, `LabelsPage` (new-label form, inline rename,
+  colour flyout, delete confirmation, Show notes), `ColorPickerFlyout`, a Labels item in the
+  navigation rail, `NoteEditorViewModel.RefreshLabelsAsync` wired to the library's detail editor
+  and every compact editor (ADR-018), `LibraryViewModel.ShowOnlyLabelAsync`;
+  `CountNotesByLabelAsync` and `Palette.LeastUsed` in Core. 23 new tests (20 App, 3 Core). Checked
+  live on Release via UI Automation against seeded notes: usage counts, create (least-used colour
+  preset, then the next one), duplicate refused, rename client → customer, recolour → pink,
+  delete do-not-delete after "It will be removed from 2 notes.", a compact editor and the detail
+  editor both showing "customer" and dropping the deleted label, the detail editor's next
+  autosave not re-creating it, and Show notes → All notes filtered to customer (3 notes). Fixed
+  live: a stale "already exists" error stayed after clearing the name. `perf-check` passes: tray-only 33.3 MB; editor open ≤ 69.6 MB; main window ≤ 82.5 MB; growth 1.2 / -2.5 MB; idle CPU 0 %. Visiting the Labels page adds about 4 MB (77.5 → 81.8 MB with only the main window used).*
 - [ ] **T2.6 🧱 Search palette + global hotkey** (REQ-050…053).
 - [ ] **T2.7 🧱 Orphaned view + relink** (REQ-061).
 - [ ] **T2.8 🧱 Settings page** (REQ-081) and start with Windows (Run key, or a StartupTask when packaged).

@@ -253,6 +253,37 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
         (await Store.ListLabelsAsync(Ct)).ShouldNotContain(l => l.Name == "client");
     }
 
+    [Fact]
+    public async Task REQ012_CountNotesByLabel_CountsLiveNotesOnly()
+    {
+        var a = await Store.UpsertAsync(_f.NewNote(@"C:\A") with { Labels = [Label.Create("client", "blue"), Label.Create("temp", "red")] }, Ct);
+        await Store.UpsertAsync(_f.NewNote(@"C:\B") with { Labels = [Label.Create("client", "blue")] }, Ct);
+        var gone = await Store.UpsertAsync(_f.NewNote(@"C:\C") with { Labels = [Label.Create("client", "blue")] }, Ct);
+        await Store.DeleteAsync(gone.Id, Ct);
+        await Store.SetOrphanedAsync(a.Id, true, Ct);
+
+        var labels = await Store.ListLabelsAsync(Ct);
+        var counts = await Store.CountNotesByLabelAsync(Ct);
+
+        counts[labels.Single(l => l.Name == "client").Id].ShouldBe(2); // orphaned counts, soft-deleted doesn't
+        counts[labels.Single(l => l.Name == "temp").Id].ShouldBe(1);
+        counts.ContainsKey(labels.Single(l => l.Name == "personal").Id).ShouldBeFalse(); // starter label, unused
+    }
+
+    [Fact]
+    public async Task REQ013_StarterLabels_AreEditableAndDeletable()
+    {
+        var starters = await Store.ListLabelsAsync(Ct);
+        starters.Select(l => l.Name).ShouldBe(["archive", "build-output", "client", "do-not-delete", "personal"]);
+
+        var client = starters.Single(l => l.Name == "client");
+        await Store.UpdateLabelAsync(client with { Name = "customer", Color = "teal" }, Ct);
+        await Store.DeleteLabelAsync(starters.Single(l => l.Name == "personal").Id, Ct);
+
+        (await Store.ListLabelsAsync(Ct)).Select(l => (l.Name, l.Color)).ShouldBe(
+            [("archive", "indigo"), ("build-output", "amber"), ("customer", "teal"), ("do-not-delete", "red")]);
+    }
+
     // ── list / filter / sort (REQ-054, REQ-052) ──
 
     [Fact]

@@ -54,6 +54,7 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
     private readonly List<NoteStatus> _statusFilters = [];
     private Task _reload = Task.CompletedTask;
     private bool _reloadAgain;
+    private Task _labelsWork = Task.CompletedTask;
     private bool _loadedOnce;
     private bool _disposed;
 
@@ -154,8 +155,8 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         return _reload;
     }
 
-    /// <summary>Completes when no reload is running or queued (tests).</summary>
-    internal Task WhenIdleAsync() => _reload;
+    /// <summary>Completes when no reload or label refresh is running or queued (tests).</summary>
+    internal Task WhenIdleAsync() => Task.WhenAll(_reload, _labelsWork);
 
     private async Task RunReloadsAsync()
     {
@@ -249,6 +250,17 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
     {
         ArgumentNullException.ThrowIfNull(filter);
         return filter.LabelName is { } name ? ToggleLabelFilterAsync(name) : ToggleStatusFilterAsync(filter.Status!.Value);
+    }
+
+    /// <summary>"Show notes" on the Labels page: only this label, every other filter cleared (05).</summary>
+    public Task ShowOnlyLabelAsync(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _labelFilters.Clear();
+        _statusFilters.Clear();
+        _labelFilters.Add(name);
+        SyncFilterChips();
+        return ReloadAsync();
     }
 
     public Task ClearFiltersAsync()
@@ -422,19 +434,34 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
 
     private async void OnLabelsChanged(object? sender, EventArgs e)
     {
+        var work = OnLabelsChangedAsync();
+        _labelsWork = work;
         try
         {
-            if (_loadedOnce && !_disposed)
-            {
-                await ReloadAsync();
-            }
+            await work;
         }
 #pragma warning disable CA1031 // See OnNoteChanged.
         catch (Exception ex)
 #pragma warning restore CA1031
         {
-            _log.Error(ex, "Reloading the library after a label change failed");
+            _log.Error(ex, "Updating the library after a label change failed");
         }
+    }
+
+    private async Task OnLabelsChangedAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var reload = _loadedOnce ? ReloadAsync() : Task.CompletedTask;
+        if (Detail is { } detail)
+        {
+            await detail.RefreshLabelsAsync(); // ADR-018
+        }
+
+        await reload;
     }
 
     public void Dispose()

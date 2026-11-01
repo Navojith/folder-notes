@@ -88,6 +88,15 @@ public sealed class DomainModelTests
     }
 
     [Fact]
+    public void REQ010_LeastUsedColour_TiesGoToPaletteOrder()
+    {
+        Palette.LeastUsed([]).ShouldBe("red");
+        Palette.LeastUsed(["red", "orange"]).ShouldBe("amber");
+        Palette.LeastUsed(Palette.Keys.Concat(["red", "orange"]).Concat(Palette.Keys.Skip(3))).ShouldBe("amber");
+        Palette.LeastUsed(["not-a-colour"]).ShouldBe("red");
+    }
+
+    [Fact]
     public void REQ013_StarterLabels_AreValid()
     {
         Label.StarterLabels.Select(l => l.Name).ShouldBe(["client", "build-output", "archive", "personal", "do-not-delete"]);

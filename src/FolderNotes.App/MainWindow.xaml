@@ -5,6 +5,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:library="using:FolderNotes.App.Library"
+    xmlns:labels="using:FolderNotes.App.Labels"
     Title="Folder Notes">
   <Window.SystemBackdrop>
     <MicaBackdrop />
@@ -17,6 +18,9 @@
       <NavigationView.MenuItems>
         <NavigationViewItem x:Name="AllNotesItem" Content="All notes" Tag="library" AutomationProperties.AutomationId="NavAllNotes">
           <NavigationViewItem.Icon><SymbolIcon Symbol="List" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem x:Name="LabelsItem" Content="Labels" Tag="labels" AutomationProperties.AutomationId="NavLabels">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="Tag" /></NavigationViewItem.Icon>
         </NavigationViewItem>
       </NavigationView.MenuItems>
       <NavigationView.FooterMenuItems>
@@ -39,6 +43,7 @@
         </StackPanel>
 
         <library:LibraryPage x:Name="Library" Grid.Row="1" />
+        <labels:LabelsPage x:Name="LabelsPage" Grid.Row="1" Visibility="Collapsed" />
 
         <!-- Settings stub until T2.8: only the theme choice (not saved across restarts yet). -->
         <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed" Padding="24,16">

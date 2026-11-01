@@ -395,6 +395,26 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
     public Task<IReadOnlyList<Label>> ListLabelsAsync(CancellationToken ct = default) =>
         ReadAsync<IReadOnlyList<Label>>(c => LoadLabels(c, null), ct);
 
+    public Task<IReadOnlyDictionary<Guid, int>> CountNotesByLabelAsync(CancellationToken ct = default) =>
+        ReadAsync<IReadOnlyDictionary<Guid, int>>(c =>
+        {
+            using var cmd = c.CreateCommand();
+            cmd.CommandText = """
+                SELECT nl.label_id, count(*) FROM note_labels nl
+                JOIN notes n ON n.id = nl.note_id
+                WHERE n.deleted_at IS NULL
+                GROUP BY nl.label_id
+                """;
+            using var r = cmd.ExecuteReader();
+            var counts = new Dictionary<Guid, int>();
+            while (r.Read())
+            {
+                counts[StorageFormat.ParseId(r.GetString(0))] = r.GetInt32(1);
+            }
+
+            return counts;
+        }, ct);
+
     public Task<Label> CreateLabelAsync(string name, string color, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(name);

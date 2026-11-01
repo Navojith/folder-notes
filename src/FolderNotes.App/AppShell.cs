@@ -25,7 +25,39 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Creates the main window's library. Null when the database couldn't be opened.</summary>
     public Func<Library.LibraryViewModel>? LibraryFactory { get; set; }
 
+    /// <summary>Creates the main window's Labels page. Null when the database couldn't be opened.</summary>
+    public Func<Labels.LabelsViewModel>? LabelsFactory { get; set; }
+
     public int OpenEditorCount => _editors.Count;
+
+    /// <summary>Label changes reach every open compact editor (ADR-018).</summary>
+    public Services.INoteEvents? NoteEvents
+    {
+        set
+        {
+            if (value is not null)
+            {
+                value.LabelsChanged += OnLabelsChanged;
+            }
+        }
+    }
+
+    private async void OnLabelsChanged(object? sender, EventArgs e)
+    {
+        foreach (var editor in _editors.ToArray())
+        {
+            try
+            {
+                await editor.ViewModel.RefreshLabelsAsync();
+            }
+#pragma warning disable CA1031 // One editor failing to refresh must not stop the others.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                _log.Error(ex, "Refreshing an editor's labels failed");
+            }
+        }
+    }
 
     /// <summary>Runs once the last window has closed (REQ-080).</summary>
     public Services.IdleTrim? IdleTrim { get; set; }
@@ -92,6 +124,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             _main = null;
             await main.CloseForGoodAsync();
             main.LibraryViewModel?.Dispose();
+            main.LabelsViewModel?.Dispose();
         }
     }
 
@@ -213,7 +246,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     {
         if (_main is null)
         {
-            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), _log);
+            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), LabelsFactory?.Invoke(), _log);
             _theme.Register(window);
             window.Hidden += (_, _) =>
             {

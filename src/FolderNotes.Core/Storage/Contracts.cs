@@ -195,5 +195,8 @@ public interface ILabelRepository
     /// <summary>Deletes the label and removes it from every note.</summary>
     Task DeleteLabelAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Live notes (orphaned included) per label id. Unused labels are absent (03, T2.5).</summary>
+    Task<IReadOnlyDictionary<Guid, int>> CountNotesByLabelAsync(CancellationToken ct = default);
+
     event EventHandler? LabelsChanged;
 }

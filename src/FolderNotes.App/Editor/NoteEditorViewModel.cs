@@ -270,13 +270,65 @@ public sealed partial class NoteEditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// Labels changed elsewhere (ADR-018): show current names and colours, and drop labels that no
+    /// longer exist, without counting as an edit, so an autosave can't re-create a deleted label.
+    /// </summary>
+    public async Task RefreshLabelsAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var all = await _labelStore.ListLabelsAsync();
+        if (_disposed)
+        {
+            return;
+        }
+
+        var previous = _allLabels;
+        _allLabels = all;
+        var byId = all.ToDictionary(l => l.Id);
+        var wasApplying = _applying;
+        _applying = true;
+        try
+        {
+            for (var i = Labels.Count - 1; i >= 0; i--)
+            {
+                var label = Labels[i];
+                if (!byId.TryGetValue(label.Id, out var current))
+                {
+                    // Gone from the store: drop it. A label created inline in this editor and not
+                    // saved yet was never stored, so it stays.
+                    if (previous.Any(l => l.Id == label.Id) || _saved?.Labels.Any(l => l.Id == label.Id) == true)
+                    {
+                        Labels.RemoveAt(i);
+                    }
+                }
+                else if (current != label)
+                {
+                    Labels[i] = current;
+                }
+            }
+
+            if (_saved is { } saved)
+            {
+                // The store already applied the change to the note; keep the baseline in step.
+                _saved = saved with { Labels = [.. saved.Labels.Where(l => byId.ContainsKey(l.Id)).Select(l => byId[l.Id])] };
+            }
+        }
+        finally
+        {
+            _applying = wasApplying;
+        }
+    }
+
     /// <summary>The palette colour used by the fewest labels; ties go to palette order (05).</summary>
     public string NextLabelColor()
     {
-        var used = _allLabels.Concat(Labels.Where(l => !_allLabels.Any(a => a.Id == l.Id)))
-            .GroupBy(l => l.Color, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-        return Palette.Keys.OrderBy(k => used.GetValueOrDefault(k)).First();
+        var labels = _allLabels.Concat(Labels.Where(l => !_allLabels.Any(a => a.Id == l.Id)));
+        return Palette.LeastUsed(labels.Select(l => l.Color));
     }
 
     private bool TryAdd(Label label)

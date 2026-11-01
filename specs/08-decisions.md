@@ -233,3 +233,18 @@ Changing the sort or filters, or reopening the window, also reloads.
 put. The order can be stale after edits (an edited note isn't moved to the top) until the next
 reload, which is the expected behaviour in list+detail apps. The ordering and filter logic stays
 in one place (`NoteFilterSql`).
+
+## ADR-018: Label deletes ask first instead of offering undo; open editors follow label changes — *accepted (T2.5, 2026-11-01)*
+
+**Context:** Deleting a label removes it from every note (03). Notes get a 10 s undo (REQ-006),
+but undoing a label delete would need the store to remember which notes had it. Separately, an
+editor that stays open (the library's detail pane survives switching to the Labels page) holds
+`Label` objects from when it loaded: after a rename it would show the old name, and after a
+delete its next autosave would re-create the label by name (unknown names create labels, 03).
+**Decision:** A label delete asks for confirmation, saying how many notes lose it, and has no
+undo. Every open editor refreshes its labels on `LabelsChanged`: current names and colours
+replace the old ones, and labels that no longer exist are dropped without counting as an edit.
+**Consequences:** No new store API for undo. Deleting is a deliberate two-step action. An editor
+never resurrects a deleted label, and chips in open editors always match the Labels page. If the
+user had unsaved label edits in an editor at that moment, only the deleted label is lost from
+them (it no longer exists).

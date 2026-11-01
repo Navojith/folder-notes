@@ -386,6 +386,37 @@ public sealed class LibraryViewModelTests : IAsyncLifetime
         _notes.Lists.ShouldBe(1); // no reload, just the times
     }
 
+    [Fact(Timeout = 20_000)]
+    public async Task REQ012_ShowOnlyLabel_ReplacesEveryFilter()
+    {
+        await AddAsync(@"D:\A", "A", n => n with { Status = NoteStatus.Keep, Labels = [Label.Create("client", "blue")] });
+        await AddAsync(@"D:\B", "B", n => n with { Labels = [Label.Create("client", "blue")] });
+        using var vm = await OpenAsync();
+        await vm.ToggleStatusFilterAsync(NoteStatus.Keep);
+        await vm.ToggleLabelFilterAsync("personal");
+
+        await vm.ShowOnlyLabelAsync("client");
+
+        vm.ActiveFilters.Select(f => f.Text).ShouldBe(["client"]);
+        Titles(vm).ShouldBe(["B", "A"]);
+    }
+
+    [Fact(Timeout = 20_000)]
+    public async Task ADR018_LabelChange_RefreshesTheDetailEditor()
+    {
+        var a = await AddAsync(@"D:\A", "A", n => n with { Labels = [Label.Create("temp", "red")] });
+        using var vm = await OpenAsync();
+        await vm.SelectAsync(a.Id);
+        var temp = vm.Detail!.Labels.Single();
+
+        await _store.DeleteLabelAsync(temp.Id, Ct);
+        _events.RaiseLabels();
+        await vm.WhenIdleAsync();
+
+        vm.Detail.Labels.ShouldBeEmpty();
+        vm.Rows.Single().Chips.ShouldBeEmpty();
+    }
+
     // ───────────── rows ─────────────
 
     [Fact(Timeout = 20_000)]

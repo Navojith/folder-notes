@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.5 Labels manager
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.6 Search palette + global hotkey
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 4 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 5 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -41,7 +41,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.2 Theme + design tokens | ✅ | 2026-10-31 | `7e3c22f` | ADR-013; 12 colours AA-checked by test; real icon; HC visual check → O-14 |
 | T2.3 Note editor + compact window | ✅ | 2026-10-31 | `bdcdb4b` | ADR-014/015; e2e via UIA on Release; REQ-080 gap → O-15 |
 | T2.4 Library view | ✅ | 2026-11-01 | `0453133` | ADR-017; main window reused; O-9 and O-17 closed; live UIA check + `perf-check` on Release |
-| T2.5 Labels manager | ⚪ next | | | |
+| T2.5 Labels manager | ✅ | 2026-11-01 | _pending_ | ADR-018; REQ-012 "Settings → Labels" resolved as its own page; live UIA check + `perf-check` |
+| T2.6 Search palette + global hotkey | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -73,6 +74,7 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | REQ-080 main window used (library, 8 notes) | <90 MB | max 81.8 MB open, 81.4 MB after close (≈100 MB private bytes); reopen 109–118 ms, first 242 ms | `perf-check` T2.4 | ✅ (8 MB headroom) |
 | NFR-06 growth, 8 main-window cycles | ≤4 MB | -2.8 MB | `perf-check` T2.4 | ✅ |
 | NFR-06 idle CPU after using the library | <0.1 % | 0 % | `perf-check` T2.4 | ✅ |
+| REQ-080 main window, Labels page visited | <90 MB | 81.8 MB open (102 MB private bytes) vs 77.5 MB on All notes only; 79.2 MB after close | T2.5 (manual) | ✅ (about 8 MB headroom) |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
 ## Open items to verify
@@ -122,6 +124,22 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.5)
+- **T2.5 done:** a **Labels** page in the main window: every label with its usage ("Used by 3
+  notes"), a new-label form preset to the least-used colour, inline rename (Enter / leaving the box
+  saves, Esc cancels), a colour flyout, delete with a confirmation that says how many notes lose
+  the label, and *Show notes* (All notes filtered to that label). 607/607 tests green in Release (Core 363 → 366, App 221 → 241).
+- **Spec changes made first:** REQ-012 now says the Labels page (it said "Settings → Labels"; 05
+  already had Labels in the navigation rail, Settings will link to it in T2.8), 05 § Labels page,
+  02 § Labels page and `CountNotesByLabelAsync`, 03 label usage, the T2.5 *Done when*, ADR-018.
+- **Found while designing:** an editor that stays open across a label delete would re-create the
+  label on its next autosave (unknown names create labels). Open editors now refresh their labels
+  on every label change and drop deleted ones without counting it as an edit (ADR-018); checked
+  live.
+- **Resources:** `perf-check` passes (main window ≤ 82.5 MB after the editor was used). The Labels page costs about 4 MB more once visited; it isn't part of `perf-check`'s cycle, so it was measured by hand. With the editor, the library and the Labels page all used, the process should be around 86 MB (estimated: 82.5 + 4, not measured together) against the 90 MB budget: T2.6 (search palette, a second window) is likely to cross it. If it does, the options are loading pages only when first opened, or raising the budget (the user's call, ADR-016).
+- **Live-check data:** the dev database was backed up before seeding and restored afterwards.
+- **Next:** T2.6 search palette + global hotkey.
 
 ### 2026-11-01 (T2.4)
 - **T2.4 done:** the main window is a NavigationView with **All notes**: list or cards, sort
