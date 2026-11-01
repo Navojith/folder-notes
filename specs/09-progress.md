@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.9 Accessibility pass
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.1 Tier-1 context menu verbs (T2.9 partial, see O-22)
 
 ---
 
@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.6 Search palette + global hotkey | ✅ | 2026-11-01 | `5a26e3f` | ADR-019; "windows used" budget 90 → 100 MB (user, ADR-016 amendment); live UIA check with the real hotkey |
 | T2.7 Orphaned view + relink | ✅ | 2026-11-01 | `1665fe1` | ADR-020 (integrity rules), ADR-021 (pages built in code; fixes a T2.6 crash); live UIA check with the real folder picker + `perf-check` |
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
-| T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
+| T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -115,7 +115,8 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 | O-19 | Orphan scan reads full notes (`ListAsync`) to classify them; measure at 10k notes and switch to a binding-only query if it costs (memory or time) | ADR-020 | T5.5 | open |
-| O-21 | JSON export/import (REQ-070, Core done in T1.7) has no UI and no task; Settings would be the natural home | 07 | user's call (T2.9 or Phase 5) | open |
+| O-21 | JSON export/import (REQ-070, Core done in T1.7) has no UI and no task. **User decision 2026-11-01:** keep as a planned feature (backup/recovery matters). Must cover: all notes + metadata, import of earlier exports, labels/colours/statuses/dates preserved, duplicate/conflict detection, no silent overwrite or data loss. Design (UI, format changes, conflict policy) pending the user's review of the options | 03 § Export format / 07 | design review, then a task in Phase 5 | open (design pending) |
+| O-22 | T2.9 outstanding acceptance criteria (**user decision 2026-11-01**): Accessibility Insights FastPass on every app window; manual keyboard walk; screen-reader pass; high-contrast look (O-14). Controls having names is not enough: real usability with assistive tech counts. Does not block other development; T2.9 stays unticked until all are done | 07 T2.9 / 05 § Accessibility | before Phase 6 at the latest | open |
 | O-20 | Relinking many notes after a parent folder moved to another drive is one *Relink…* per note; a "relink the others under the same parent" helper could come later (not in v1 scope) | 05 § Orphaned page | post-v1 / user's call | open |
 
 ## Blockers
