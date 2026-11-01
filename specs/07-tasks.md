@@ -276,8 +276,34 @@ smoke tests pass.
   that nothing outside our keys is touched; a test proves `App.xaml.cs`/`AppShell.cs` never enable the verbs;
   the CLI switches work; the Settings card shows the real state; a live check on the real HKCU registers, right-click
   on a folder runs `--edit "<folder>"` through the verb, and unregisters, leaving the registry as found.
-- [ ] **T3.2 🧱 ExplorerTracker service** (REQ-031, 034), production version of S1: STA thread,
-  events + polling fallback, Explorer restart recovery.
+- [ ] **T3.2 🧱 ExplorerTracker service** (REQ-031, 034, NFR-01, NFR-06), production version of S1.
+  Design: 04 § ExplorerTracker design, ADR-025. Not wired to the UI until T3.4. Done in five steps, in order;
+  T3.2 is ticked when all five are:
+  - [ ] **T3.2.1 🔬 Probes** (spike `spikes/S5-tracker-probes`, never shipped; findings go into 04 and ADR-025):
+    **P1** every interface and method signature in 04 B.1 is validated (vtable order vs SDK headers and a live call
+    per method, `VARIANT` index, `HRESULT` handling, `QueryInterface`/casting, RCW lifetime and release); on
+    unreliability switch to CsWin32, no workarounds (decision D1); **P2** `CoCancelCall` returns a blocked
+    proxy call within 50 ms of the request, against a scratch out-of-process COM server; **P3** path-read parity
+    (04 § E list) and cost; **P5** idle CPU with global vs process-scoped `NAMECHANGE` hooks while a browser and a
+    terminal update their titles. *(P4, the `rundll32` private-server behaviour, needs a disposable session: see
+    T3.2.5 and D5.)* *Done when:* each probe has a measured result in 04 and ADR-025 is updated; if P1 or P2 fail,
+    the spec is amended (CsWin32; abandon-only time-boxing) before T3.2.2 starts.
+  - [ ] **T3.2.2 🧱 Pure logic** (`TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`,
+    `ActiveFolderState`, `FakeShellWindowsGateway`) and their unit tests (06 § ExplorerTracker tests, *Logic*).
+    *Done when:* all logic tests pass with `FakeTimeProvider`, no Win32/COM referenced from these types.
+  - [ ] **T3.2.3 🧱 COM layer:** typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA host with
+    message loop, watchdog (cancel → abandon → circuit breaker). *Done when:* the COM, stale/disconnected and
+    wedge tests pass; the `dynamic`/`InvokeMember` source guard passes; live-RCW count is 0 after tests.
+  - [ ] **T3.2.4 🧱 `ExplorerTracker` composition:** scoped WinEvent hooks, scheduler wiring, poll safety net,
+    recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
+    `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
+    pass; `AppShell`/`App.xaml.cs` do not start it (guard test).
+  - [ ] **T3.2.5 ✅ Real-Explorer verification:** the integration and reliability tests, the idle-CPU
+    measurement, P4 and the gated restart test where a disposable session exists (D5). *Done when:* 06 §
+    ExplorerTracker tests pass on this machine (Windows 11 23H2); numbers (latency, evaluation cost, idle CPU,
+    leak deltas) are recorded in 09; every "tunable" value in 04 is either confirmed or changed in the spec; the
+    REQ-031 evaluation cost is < 10 ms (closes the ❌ in 09). Restart recovery and Windows 10 are recorded as
+    verified-by-fault-injection only if they could not be run (O-6, O-23).
 - [ ] **T3.3 🧱 PanelDocker** (REQ-030, 033, 038), production version of S2: position modes,
   DPI, snap and maximize handling.
 - [ ] **T3.4 🧱 Companion panel UI** (REQ-032, 035, 036, 037): states, inline edit, pin,

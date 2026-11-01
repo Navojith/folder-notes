@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2 ExplorerTracker (T2.9 partial, see O-22)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.1 tracker probes, after D1–D5 are answered (T3.2 spec done; T2.9 partial, see O-22)
 
 ---
 
@@ -118,8 +118,20 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 | O-19 | Orphan scan reads full notes (`ListAsync`) to classify them; measure at 10k notes and switch to a binding-only query if it costs (memory or time) | ADR-020 | T5.5 | open |
 | O-21 | JSON export/import (REQ-070, Core done in T1.7) had no UI and no task. **Option 1 chosen 2026-11-01 (ADR-023): preview-then-apply with a verified snapshot, format stays v1; spec written (01 AC, 03 § Import with preview and snapshot incl. restore steps); tasks T5.6 (Core) and T5.7 (UI) in Phase 5, after T5.3.** **User decision 2026-11-01:** keep as a planned feature (backup/recovery matters). Must cover: all notes + metadata, import of earlier exports, labels/colours/statuses/dates preserved, duplicate/conflict detection, no silent overwrite or data loss. | 03 § Import with preview / 07 | T5.6, T5.7 | open (specified, not built) |
+| O-23 | Elevated (run-as-administrator) Explorer windows: unsupported in v1 by user decision (null path, no crash, no retry loop); confirm that behaviour by hand | 04 § G L8 | T3.2.5 / T3.5 manual | open |
+| O-24 | Real Explorer restart recovery and P4 (`rundll32` private ShellWindows server) need Explorer killed, so only a disposable session can run them (D5). Until then: verified by fault injection only | 04 § F / 06 | T3.2.5 | open |
 | O-22 | T2.9 outstanding acceptance criteria (**user decision 2026-11-01**): Accessibility Insights FastPass on every app window; manual keyboard walk; screen-reader pass; high-contrast look (O-14). Controls having names is not enough: real usability with assistive tech counts. Does not block other development; T2.9 stays unticked until all are done | 07 T2.9 / 05 § Accessibility | before Phase 6 at the latest | open |
 | O-20 | Relinking many notes after a parent folder moved to another drive is one *Relink…* per note; a "relink the others under the same parent" helper could come later (not in v1 scope) | 05 § Orphaned page | post-v1 / user's call | open |
+
+## Decisions on the T3.2 design (ADR-025 accepted 2026-11-01)
+
+| # | Decision | Recommendation | Trade-off |
+|---|---|---|---|
+| D1 | COM interop source: hand-written `[GeneratedComInterface]` (about 7 small interfaces) vs the CsWin32 package | Hand-written, proven by probe P1 first | No new dependency and it matches the existing `LibraryImport` code; but a wrong vtable slot is a silent crash risk. CsWin32 takes the layout from metadata, at the cost of a build-time package and its generated surface. If P1 fails we switch to CsWin32 | **DECIDED: A**, probes validate every signature; switch to CsWin32 on unreliability
+| D2 | Cache invalidation by WinEvents + validate-on-failure (no sinks) vs `DShellWindowsEvents`/`DWebBrowserEvents2` sinks | WinEvents only | Sinks need hand-written `IDispatch` sinks over `VARIANT` and die with Explorer; WinEvents are not a documented contract (L1/L2), covered by the poll and 30 s reconciliation. Revisit only if T3.2.5 sees missed changes | **DECIDED: A**, poll and reconciliation stay; no permanent staleness
+| D3 | 30 ms throttle (leading + trailing) + confirm pass, replacing the old "debounce to 50 ms" | Throttle | Can publish twice for one navigation (the confirm pass may correct a transient) so the consumer must tolerate a quick second state; a debounce would add up to 50 ms to S1's 107 ms worst case, over REQ-031 | **DECIDED: accept**; ordering, no flicker, no redundant updates required
+| D4 | Time-boxing by `CoCancelCall` then abandon-and-replace the thread, with a 3-wedge circuit breaker | As specified | An abandoned thread and its COM objects are leaked on purpose (bounded by the breaker). If P2 shows cancel doesn't work against Explorer proxies, only the abandon step remains and its 1 s becomes the effective limit | **DECIDED: accept with hard bounds** (04 B.6); no safe-cancel claim without P2 evidence
+| D5 | May the real "kill explorer.exe" test (and P4) run on this dev desktop? | No: disposable session or VM only; one supervised manual run at T3.5 if you agree | Killing the shell closes every Explorer window you have open (it restarts by itself). Without it, restart recovery is verified by fault injection only (O-24) | **DECIDED: no**; VM only; O-24 open
 
 ## Blockers
 
@@ -144,6 +156,13 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T3.2 specification, no code)
+- **Specs written first, no implementation:** 04 § ExplorerTracker design (A–G: structure, COM interop, tab cache, coalescing, path reading, reliability/recovery, Windows/COM limits L1–L12; replaces the old step list and the "debounced to 50 ms" line); 04 § 4.4 and 02 (`IExplorerTracker` now has `Current`, `Start`/`Stop`, `NotifyShellRestarted`, `GetStats`; event is `{FrameHwnd, TabHwnd, Path?, Sequence}`, no `RECT`); 06 § ExplorerTracker tests; 07 T3.2 split into T3.2.1–T3.2.5; ADR-025 (*proposed*); ADR-004 marked partly superseded; O-23, O-24 and decisions D1–D5 above.
+- **Inconsistencies in the old specs, now resolved:** 04 listed `DWebBrowserEvents2`/`DShellWindowsEvents` subscriptions while ADR-004 (S1) said sinks are not needed; poll interval was 250 ms (ADR-004) vs 500 ms (04); the event carried a `RECT` in 04 but not in 02.
+- **Findings from reading the code and this machine (not assumptions):** (1) `CLSID_ShellWindows` is `LocalServer32 = rundll32.exe shell32.dll,SHCreateLocalServerRunDll {…}`, so creating it while Explorer is down can hand back a private empty server; recovery is gated on `GetShellWindow()` and validates the enumeration. (2) COM has no call timeout; the design needs cancel-then-abandon. (3) A global `NAMECHANGE` hook wakes the thread for every title change in the system; hooks are scoped to the foreground Explorer's process. (4) A 50 ms debounce plus S1's 107 ms worst case would break REQ-031. (5) `TaskbarCreated` only reaches top-level windows, so the tray window forwards it.
+- **Review against ADR-007 and Phase 3:** typed interop, no `dynamic`, no reflection, with a source guard test. REQ-031 (150 ms, evaluation < 10 ms) and REQ-034 (tabs) are covered by §C/§D and the tests; REQ-033/038 are untouched (PanelDocker/T3.3; the foreground-owned-window rule in §D.7 keeps the folder while the panel has focus). NFR-01 (never harm Explorer): read-only, prompt release of references, no private server. NFR-06 idle CPU: no timers in the background, scoped hooks. Windows 10 and elevated Explorer remain unverified (O-6, O-23).
+- **Next:** the user answers D1–D5; then T3.2.1 (probes). No implementation has started.
 
 ### 2026-11-01 (T3.1 live checks, done)
 - **Settings card (UIA, real HKCU, Release build):** Off shows "Not in the right-click menu."; toggling On writes both keys; changing both commands to another exe path and revisiting the page shows Stale with the old path and a Repair button, and Repair restores On; deleting one key shows Stale again and Repair fixes it; with Delete denied on a `command` key, switching Off shows "Couldn't change this: Attempted to perform an unauthorized operation.", the toggle stays On and the registry is unchanged; after the ACL is removed, Off works and the error clears. Registry left with no keys.

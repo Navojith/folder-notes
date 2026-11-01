@@ -340,9 +340,15 @@ public interface IFolderIdentityService {
 // stored serial, T2.7). A ref without a file ID (network/removable, REQ-062) is "Found" only if its
 // path exists.
 
-public interface IExplorerTracker {                 // App layer
-    event EventHandler<ActiveFolderChangedEventArgs> ActiveFolderChanged; // HWND, path or null
+public interface IExplorerTracker : IDisposable {   // App layer (04 § ExplorerTracker design, ADR-025)
+    ActiveFolderState Current { get; }              // last published; FrameHwnd 0 = Inactive
+    event EventHandler<ActiveFolderChangedEventArgs> ActiveFolderChanged; // raised on the UI thread, latest-wins
+    void Start();                                   // idempotent; own STA thread, hooks, watchdog
+    void Stop();                                    // removes hooks/timers, releases COM, bounded wait
+    void NotifyShellRestarted();                    // from the tray window's TaskbarCreated handler
+    TrackerStats GetStats();                        // evaluations, p50/p95/max ms, rebuilds, wedges, live RCWs
 }
+// ActiveFolderState(FrameHwnd, TabHwnd, Path?, Sequence): plain data, no COM objects, no bounds (PanelDocker owns those).
 ```
 
 ## Error handling & logging
@@ -351,5 +357,5 @@ public interface IExplorerTracker {                 // App layer
   logs never leave the machine.
 - Shell extension: no logging to disk by default (REQ-042). `OutputDebugString` in debug builds
   only. Every COM entry point is wrapped in `try { … } catch (...) { return E_FAIL; }`.
-- The app must survive Explorer restarts. The tracker re-subscribes when `explorer.exe` restarts
-  (`TaskbarCreated` message).
+- The app must survive Explorer restarts. The tracker detects them four ways and rebuilds its cache by itself
+  (`TaskbarCreated` forwarded by the tray window is one of the four; 04 § ExplorerTracker design F).

@@ -11,7 +11,9 @@ requirement ID, e.g. `REQ060_Rename_KeepsNoteAttached`.
 | Core unit | xunit.v3 + Shouldly, in-memory/temp-file SQLite | repository, validation (REQ-002), labels, search parsing & ranking (REQ-051/052/023), path normalization (REQ-063), migrations |
 | Identity integration | xunit.v3 on real temp folders (NTFS), plus a fake identity for what one disk can't show (another volume at the same letter, an unmounted volume) | rename/move tracking (REQ-060), orphan detection and relink rules (REQ-061, 03 § Orphan detection / § Relink rules, ADR-020): deleted, moved, recreated, Recycle Bin, drive unavailable, same-named folders, conflicts, concurrent changes, content unchanged |
 | App services | xunit.v3 + fakes | ReminderService due/snooze/once logic (REQ-021/024), autosave debounce (REQ-005), undo (REQ-006), single-instance arg routing |
-| Explorer tracker | Integration tests driving real Explorer (`explorer.exe <path>`, `IShellWindows` navigate) — run locally and on a Windows CI runner with a desktop session | REQ-031 latency, REQ-034 tabs, virtual folders → null |
+| Explorer tracker, logic | xunit.v3 + `FakeShellWindowsGateway` + `FakeTimeProvider`; no Explorer, no threads | `TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`, no-op suppression, latest-wins publishing (details below) |
+| Explorer tracker, COM | xunit.v3, in-process fault injection around the typed interop, plus a scratch out-of-process COM server (probe P2) | `ComRef` release, live-RCW count = 0, `Gone`/`Transient` handling, cancel and abandon |
+| Explorer tracker, integration | Real Explorer (`explorer.exe <path>`, scripted keys as in S1), `[Trait("Category","Explorer")]`, skipped without an interactive desktop; local and on a CI runner with a desktop session | REQ-031 latency, REQ-034 tabs, virtual folders → null |
 | Shell extension | GoogleTest on the DLL's pure functions (path normalize, tooltip formatting, query) + a harness that `CoCreateInstance`s the handler out of Explorer and measures `GetInfoTip` latency | REQ-040/041/042 |
 | UI smoke | FlaUI | add note via `--edit`, search & open, panel shows note |
 | Performance | BenchmarkDotNet + a seeded DB of 10k notes | REQ-041 (<20 ms), REQ-051 (<100 ms), NFR-05 |
@@ -48,6 +50,67 @@ and records **private working set and private bytes separately** at each stage:
 `tests/shared/path-normalization-vectors.json` holds input → expected `path_norm` pairs. **Both**
 the C# and C++ normalizers must pass every vector. This keeps the app and the shell extension
 agreeing on lookups.
+
+## ExplorerTracker tests (T3.2, REQ-031/034, NFR-01/06)
+
+Names carry the requirement, e.g. `REQ031_RapidNavigation_PublishesFinalFolder`. Design: 04 § ExplorerTracker design.
+
+**Logic (always run; fake gateway, fake clock):**
+- `TabMap`: add on rebuild; miss → rebuild; `DESTROY` removes and releases; `IsWindow` false drops; `Gone` drops one entry
+  only; HWND reuse with a dead object is replaced; frame with several tabs; no-tab frame → implicit tab; the 256-entry
+  bound evicts the oldest non-foreground entry; a rebuild never nests.
+- `EvaluationScheduler`: first signal runs at once (leading); signals inside 30 ms produce exactly one trailing run;
+  a continuous stream gives ≤ 1 run per window and the last state is processed; the confirm pass at +75 ms runs only
+  after a change and a differing result publishes a second state; the retry ladder stops after the last rung; no
+  timer is armed when no Explorer frame is foreground; poll backs off 500 ms → 2 s after 10 s of silence.
+- No-op suppression: same `(frame, path)` publishes nothing (case-insensitive path); a tab switch between tabs on the
+  same folder publishes nothing; a different frame on the same path does publish.
+- Publishing: latest-wins when the UI is slow; `Sequence` strictly increases; `Inactive` when the foreground window is
+  not (and is not owned by) an Explorer frame.
+- `ComFailureClassifier`: every HRESULT in the 04 B.5 table; unknown HRESULTs are `Other`.
+- `TrackerStateMachine`: `Running → Recovering → Running`; 3 wedges in 10 min → `Disabled`; the fourth wedge after
+  10 quiet minutes does not trip it; `Stop`/`Start` from `Disabled` only through an explicit Retry.
+
+**Stale references, disconnected objects (fault injection):** `Gone` on one tab leaves the others working; `Gone` on the
+root triggers recovery and publishes `Inactive` first; `Transient` retries on the ladder and ends; `Other` ×3 drops the
+entry; an exception in any gateway call never escapes the loop; live-RCW count is 0 after `Stop` and after every
+`Rebuild` that dropped entries.
+
+**Recovery:** with the fake: kill the root mid-run, assert `Inactive` → `Recovering` → `Running`, the cache rebuilt, the
+same events as a fresh start, no manual restart, and no `IShellWindows` creation attempt while `GetShellWindow()` is 0
+(fake shell window). A created root that enumerates nothing while frames exist is replaced (L7). Real Explorer: see
+the gated test below.
+
+**Bounds and ordering (user decisions D2–D4):** a second tracker `Start` is refused; after N wedges the number of live
+and abandoned threads never exceeds the cap (1 live, ≤ 3 abandoned) and at the cap `Retry` stays `Disabled`; an
+abandoned thread's late result is never published (generation gate); with all hooks disabled the state still
+converges within 2.5 s through the poll; an older evaluation finishing after a newer one is dropped; no publish for
+an unchanged state; an elevated/denied frame is not retried until it navigates or regains foreground.
+
+**Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, a new thread
+serves the next signal, the old thread's late result is discarded (generation), the UI thread is never blocked,
+`Stop` returns in ≤ 2 s even while wedged.
+
+**Integration (real Explorer, interactive desktop, `Category=Explorer`; the S1 scenarios promoted to tests):** navigate
+(different names, same-named folders, Unicode path), virtual folder → `null`, new tab, switch tab (both directions),
+switch window, minimize/restore, the panel-owned window in the foreground keeps the folder, two windows × several
+tabs. Each asserts the published state equals Explorer's own and measures latency (≤ 150 ms; record median/max) and
+`TrackerStats` evaluation cost (< 10 ms).
+
+**Reliability (real Explorer):** rapid navigation (200 Alt+Up/Backspace/path-entry steps), rapid tab switching (200
+Ctrl+Tab), open/close 50 windows and 50 tabs in a loop: final published state matches Explorer after input stops;
+published events ≤ a bound documented with the test; live RCWs and tab entries return to the baseline; private bytes
+and handle count grow ≤ 1 MB / ≤ 10 over the loop; no `rundll32.exe` or extra `explorer.exe` started by us.
+
+**Explorer restart (real; gated).** Killing the shell disturbs the desktop, so it runs only when
+`FOLDERNOTES_ALLOW_EXPLORER_KILL=1` is set and only on a disposable session (CI runner or VM), never by default and
+never on the dev desktop unless the user says so (09 decision D5): kill `explorer.exe` (Windows restarts it), assert
+`Inactive` within 150 ms of the window destruction, recovery within 10 s, a correct state after it, repeat 5 times,
+no extra processes. Until it has run, restart recovery is "verified by fault injection only" in 09.
+
+**Idle CPU (`perf-check` stage, T3.5; first measured in T3.2.5):** < 0.1 % over 60 s with Explorer foreground and
+untouched; 0 % with another app foreground; zero timers/hook callbacks counted in `TrackerStats` while Explorer is
+in the background.
 
 ## Explorer stability (NFR-01)
 

@@ -37,7 +37,7 @@ test vectors (`06-testing.md`) to make sure both implementations agree.
 sidecar). The shell extension can read the DB directly, so there's no IPC and no dependency on the
 app running.
 
-## ADR-004: Explorer tracking via IShellWindows + WinEvents — *accepted (S1, 2026-10-31)*
+## ADR-004: Explorer tracking via IShellWindows + WinEvents — *accepted (S1, 2026-10-31); decision text below superseded by ADR-025 (sinks, 250 ms poll)*
 
 S1 confirmed it. `EVENT_OBJECT_NAMECHANGE` + `EVENT_SYSTEM_FOREGROUND` + minimize events catch
 every scenario (navigation, same-name folders, tabs, window switch) within the 150 ms budget. The
@@ -377,3 +377,46 @@ and the state re-read, never assumed. The app never repairs on its own and only 
 under the two `shell` parents.
 **Consequences:** A fresh install from source has no menu entry until the user turns it on; the installer meets
 the original "registered on first run" intent. Tests use a scratch registry root, never the real keys.
+
+## ADR-025: ExplorerTracker design: events only, throttled, one STA thread, cancel-then-abandon — *accepted (T3.2 spec, 2026-11-01; user decisions D1–D5, see 09)*
+
+**Context:** S1 proved the mechanism (ADR-004) and the typed-interop rule (ADR-007). T3.2 turns it into a service
+that must not hurt Explorer, survive Explorer restarts and never block on a hung COM call. Reading the specs and
+this machine's registry turned up things the earlier text did not cover: COM has no call timeout; WinEvent
+callbacks can run while the STA thread is inside an outgoing call; `NAMECHANGE` is global and chatty (idle cost);
+a 50 ms debounce can push S1's 107 ms worst case past REQ-031's 150 ms; `CLSID_ShellWindows` is a
+`rundll32 shell32.dll,SHCreateLocalServerRunDll` local server, so creating it while Explorer is down can return a
+private empty server.
+**Decision:** The design in 04 § ExplorerTracker design, in short:
+1. No `DWebBrowserEvents2` / `DShellWindowsEvents` sinks. WinEvents (`FOREGROUND`, and while an Explorer frame is
+   foreground `NAMECHANGE`, `SHOW`/`HIDE`, `MINIMIZE*`, `CREATE`/`DESTROY`, scoped to that frame's process) only mark
+   "re-read"; the shell is the source of truth. A slow reconciliation (30 s, foreground only) and a 500 ms → 2 s poll
+   remain as safety nets (S1: events alone were enough). **Supersedes** ADR-004's "`DWebBrowserEvents2` plus a
+   250 ms poll" decision text (its S1 amendment already dropped the sinks).
+2. A browser→tab cache keyed by the tab's `ShellTabWindowClass` HWND; steady state reads one path from one cached
+   object and never enumerates. Stale entries are dropped by `DESTROY`, `IsWindow`, `Gone` HRESULTs and reconciliation.
+3. Coalescing is a **throttle with leading and trailing edges** (30 ms) plus a confirm pass (+75 ms), not a debounce;
+   no-op results publish nothing; publishing is latest-wins on the UI thread.
+4. One dedicated STA thread owns every COM object (`ComRef<T>`, deterministic `FinalReleaseComObject`); no COM
+   reference crosses threads.
+5. Time-boxing: `CoCancelCall` from a watchdog at 250 ms; abandon the thread and start a new one at +1 s; three
+   wedges in 10 min disable the tracker until the user retries.
+6. Restart recovery: four detectors, release all, recreate `IShellWindows` only when the shell window exists,
+   validate the enumeration, rebuild, no user action.
+7. Path reading through `IShellBrowser`/`IPersistFolder2` (fallback `LocationURL`), not `Document.Folder.Self.Path`.
+8. The event carries `{FrameHwnd, TabHwnd, Path?, Sequence}`; bounds belong to `PanelDocker`. (04 previously said the
+   event carried a `RECT`; 02 said HWND and path.)
+**Alternatives:** COM connection-point sinks (needs hand-written `IDispatch` sinks over `VARIANT`, adds the
+largest unproven interop surface, and S1 showed no need); a 50 ms debounce (simpler, but eats the latency budget);
+UI Automation on the address bar (ADR-004); MTA instead of STA (the hooks need a message loop anyway).
+**Consequences:** More types than S1 but each is small and mostly pure, so the risky COM part is thin. Four
+behaviours rest on facts to be measured first (probes P1–P3, P5 in T3.2.1) and two on a disposable session (P4,
+restart test). Elevated Explorer windows and Windows 10 are explicitly unverified (04 § G, 09 O-6, O-23).
+**User decisions (2026-11-01):** D1 hand-written `[GeneratedComInterface]`, validated signature by signature in
+T3.2.1, with CsWin32 as the switch (not workarounds) if interop proves unreliable. D2 WinEvents only; poll and
+reconciliation stay so a missed event can never leave the panel permanently stale. D3 throttle + confirm pass
+accepted; ordering, no flicker and no redundant updates are requirements; REQ-031 outranks one-update-per-navigation.
+D4 cancel/abandon/breaker accepted with hard bounds (one tracker, bounded threads, generation-gated publishing);
+no claim of safe COM cancellation without probe evidence. D5 no Explorer kill on the dev desktop (disposable VM only;
+O-24 stays open). Elevated Explorer unsupported in v1 (no crash, no retry loop). No live monitor before T3.4;
+`GetStats()` and test fixtures are the diagnostics.
