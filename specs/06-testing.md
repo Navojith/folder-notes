@@ -27,6 +27,7 @@ and records **private working set and private bytes separately** at each stage:
 | Tray-only, 12 s after start | working set, private bytes, idle CPU over 60 s | WS < 50 MB, CPU < 0.1 % |
 | Editor open (each of 8 cycles, 2 s after it appears) | working set, private bytes, time to window | WS < 90 MB |
 | Editor closed (each cycle, 10 s after close) | working set, private bytes | WS < 90 MB |
+| Main window (8 cycles since T2.4: open on All notes, 2 s; closed, 10 s) | working set, private bytes, time to window | WS < 90 MB, growth ≤ 4 MB |
 | Across cycles | private bytes after close, cycle 2 → last | growth ≤ 4 MB (8 cycles), ≤ 8 MB (soak) |
 | After use | idle CPU over 60 s | < 0.1 % |
 | Panel active *(added in T3.5)* | working set, private bytes with Explorer open on a noted folder | WS < 110 MB |

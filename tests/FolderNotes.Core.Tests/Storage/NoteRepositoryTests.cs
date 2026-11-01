@@ -270,7 +270,7 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
 
         (await Titles(new NoteQuery { Sort = NoteSort.UpdatedDesc })).ShouldBe(["old", "bin", "beta", "Acme"]);
         (await Titles(new NoteQuery { Sort = NoteSort.Title })).ShouldBe(["Acme", "beta", "bin", "old"]);
-        (await Titles(new NoteQuery { Sort = NoteSort.Path })).ShouldBe(["bin", "old", "Acme", "beta"]); // ordinal on path_norm: "O" < "\\"
+        (await Titles(new NoteQuery { Sort = NoteSort.Path })).ShouldBe(["bin", "Acme", "beta", "old"]); // hierarchical (O-9)
         (await Titles(new NoteQuery { Sort = NoteSort.DueDate })).ShouldBe(["bin", "beta", "Acme", "old"]);
         (await Titles(new NoteQuery { Labels = ["CLIENT"], Sort = NoteSort.Title })).ShouldBe(["Acme", "beta"]);
         (await Titles(new NoteQuery { Labels = ["client", "personal"] })).ShouldBe(["beta"]);
@@ -284,6 +284,26 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
         (await Titles(new NoteQuery { Sort = NoteSort.Title, Limit = 2, Offset = 1 })).ShouldBe(["beta", "bin"]);
         (await Titles(new NoteQuery { Ids = [acme.Id, bin.Id], Sort = NoteSort.Title })).ShouldBe(["Acme", "bin"]);
         _ = beta;
+    }
+
+    [Fact]
+    public async Task REQ054_PathSort_IsHierarchical()
+    {
+        foreach (var path in new[] { @"D:\ClientsOld", @"D:\Clients-x", @"D:\Clients\Acme\2025", @"D:\Clients", @"D:\Clients\Acme", @"C:\Z", @"\\server\share\a" })
+        {
+            await Store.UpsertAsync(_f.NewNote(path, path), Ct);
+        }
+
+        (await Store.ListAsync(new NoteQuery { Sort = NoteSort.Path }, Ct)).Select(n => n.Title).ShouldBe(
+        [
+            @"\\server\share\a", // UNC paths start with '\', so they come first
+            @"C:\Z",
+            @"D:\Clients",
+            @"D:\Clients\Acme",
+            @"D:\Clients\Acme\2025", // subfolders right after their parent (O-9)
+            @"D:\Clients-x",
+            @"D:\ClientsOld",
+        ]);
     }
 
     [Fact]

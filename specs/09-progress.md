@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.4 Library view
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.5 Labels manager
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 3 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 4 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -40,7 +40,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.1 WinUI 3 app skeleton | ✅ | 2026-10-31 | `38116ec` | App.Tests (47); ADR-012 tray; O-11 closed by `UiNoteEvents` |
 | T2.2 Theme + design tokens | ✅ | 2026-10-31 | `7e3c22f` | ADR-013; 12 colours AA-checked by test; real icon; HC visual check → O-14 |
 | T2.3 Note editor + compact window | ✅ | 2026-10-31 | `bdcdb4b` | ADR-014/015; e2e via UIA on Release; REQ-080 gap → O-15 |
-| T2.4 Library view | ⚪ next | | | The main window needs ADR-015-style reuse; run `eng/perf-check.ps1` before ticking |
+| T2.4 Library view | ✅ | 2026-11-01 | _pending_ | ADR-017; main window reused; O-9 and O-17 closed; live UIA check + `perf-check` on Release |
+| T2.5 Labels manager | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -69,6 +70,9 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | NFR-06 growth over 8 cycles (private bytes) | ≤4 MB | +0.4 MB, cycle 2 → 8 | `perf-check` 2026-11-01 | ✅ |
 | NFR-06 idle CPU | <0.1 % of one core | 0 % tray-only; 0.052 % after use (60 s windows) | `perf-check` 2026-11-01 | ✅ |
 | NFR-06 soak (120 cycles) | ≤8 MB growth | not run yet | T5.5 | ⚪ |
+| REQ-080 main window used (library, 8 notes) | <90 MB | max 81.8 MB open, 81.4 MB after close (≈100 MB private bytes); reopen 109–118 ms, first 242 ms | `perf-check` T2.4 | ✅ (8 MB headroom) |
+| NFR-06 growth, 8 main-window cycles | ≤4 MB | -2.8 MB | `perf-check` T2.4 | ✅ |
+| NFR-06 idle CPU after using the library | <0.1 % | 0 % | `perf-check` T2.4 | ✅ |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
 ## Open items to verify
@@ -84,7 +88,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-5 | Mixed-DPI multi-monitor docking | 04 § S2 | T3.5 manual | open (one monitor here) |
 | O-6 | Windows 10 22H2: tracker, panel, tooltip | 04 | T3.5 / T4.5 | open (no Win10 machine) |
 | O-7 | Folder identity on exFAT/FAT32, ReFS, network shares, OneDrive Files-On-Demand, cross-volume moves | 03 § S4 | manual, before T6.3 | open: code is defensive (IDs only on NTFS/ReFS, path fallback elsewhere) but there's no hardware to test on |
-| O-9 | Path sort is ordinal on `path_norm`, so `D:\ClientsOld` sorts before `D:\Clients\Acme`. Should the library sort hierarchically? | 03 / REQ-054 | T2.4 | open |
+| O-9 | Path sort is ordinal on `path_norm`, so `D:\ClientsOld` sorts before `D:\Clients\Acme`. Should the library sort hierarchically? | 03 / REQ-054 | T2.4 | **closed** 2026-11-01: yes; `\` sorts as `char(1)` (03 § Repository rules) |
 | O-10 | Run BenchmarkDotNet on Release (06 § Performance); T1.6 used an xunit timing test instead | 06 | T5.5 | open |
 | O-11 | `NoteChanged` handlers run on the writer task (ADR-011); the app must marshal them to the UI thread | 02 / ADR-011 | T2.1 | **closed** 2026-10-31: `UiNoteEvents` relays via `IUiDispatcher`; UI code subscribes there (02 § App shell) |
 | O-12 | Tray icon comes back after an Explorer restart (`TaskbarCreated`), and has the right size at 150% / mixed DPI | 02 § App shell / ADR-012 | T3.5 manual | open: code path written, not exercised (didn't restart the user's Explorer) |
@@ -92,7 +96,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-14 | High-contrast look of chips, pills and windows (tokens map to system colours; tests check the file, but nobody has seen it on screen) and a live HC toggle re-rendering open chips | 05 § Design tokens | T2.9 manual | open: switching HC changes the user's whole desktop theme, so T2.2 didn't do it |
 | O-15 | REQ-080 is over target once a window has been used: ≈65 MB private working set (≈83 MB private bytes) vs <60 MB, the one-time cost of loading WinUI's controls. An idle `EmptyWorkingSet` would show 2.7 MB in Task Manager, but commit stays at 83 MB. Options: trim the working set when idle, change the target or metric, or host windows in a child process | REQ-080 / ADR-015 | before T2.4 | **closed** 2026-11-01: the user chose per-state budgets (ADR-016); no trimming, no UI process |
 | O-16 | Re-baseline the REQ-080 budgets (50 / 90 / 110 MB) once the companion panel and Acrylic exist, and add the panel and Explorer-navigation stages to `perf-check` | REQ-080 / NFR-06 / ADR-016 | T3.5 | open |
-| O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | open |
+| O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
 ## Blockers
@@ -118,6 +122,26 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.4)
+- **T2.4 done:** the main window is a NavigationView with **All notes**: list or cards, sort
+  (last updated / title / due date / hierarchical path), label (all-of) and status (any-of)
+  filters with removable chips, empty states, and master/detail with the same editor as the
+  compact window (narrow layout: Back / Alt+Left). `--open-note` now selects the note in the
+  library. The main window is hidden and reused like the editor (ADR-015). Settings holds only
+  the theme until T2.8; the T2.2 token sample is gone. 584/584 tests green in Release (Core 363, App 179 → 221).
+- **Spec changes made first:** 05 § Library behaviour, 02 § Library and the main-window lifetime,
+  03 hierarchical path sort, the T2.4 *Done when*, ADR-017 (edits update rows in place; structural
+  changes reload, coalesced). *Due & reminders* is now part of T5.1 (it had no task).
+- **Adjusted after seeing it live:** list rows became three lines (title | next date, path |
+  edited, status + chips) because a right-hand date column squeezed the path and chips; the list
+  pane is 45 % / at least 400 px (was 40 % / 360); the row path budget is 36 characters (was 60)
+  so the middle trim, not the end ellipsis, decides what's hidden.
+- **Resources:** `perf-check` now also cycles the main window. All checks pass, but the library costs about 14 MB more than the editor alone (81.8 MB with both used vs 68 MB), leaving 8 MB under the 90 MB "windows used" budget. T2.5–T2.8 add pages to the same window, so watch it with `perf-check` at each task; O-16 re-baselines after Phase 3.
+- **Live-check data:** the dev database was backed up before seeding 7 notes under
+  `C:\Temp\FolderNotesE2E` with a scratch tool, and restored afterwards, so this task left no
+  notes behind. (The older residue from T2.3 is still there.)
+- **Next:** T2.5 labels manager.
 
 ### 2026-11-01 (O-15 decision)
 - **Decided (user):** REQ-080 gets per-state budgets instead of one "< 60 MB idle": tray-only

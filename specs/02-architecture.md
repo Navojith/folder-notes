@@ -134,9 +134,10 @@ Resolved in T2.1:
 - **Entry point:** a custom `Program.Main` (`DISABLE_XAML_GENERATED_MAIN`) does the
   single-instance check *before* any XAML is created, so a redirected second launch costs
   almost nothing.
-- **Lifetime:** `DispatcherShutdownMode.OnExplicitShutdown`. Closing the main window **destroys**
-  it (it is recreated on demand) and the process stays in the tray, which keeps idle memory low
-  (REQ-080). Only **Quit** in the tray menu ends the process: it removes the tray icon, flushes
+- **Lifetime:** `DispatcherShutdownMode.OnExplicitShutdown`. Closing the main window **hides** it
+  (since T2.4; it was destroyed before): the detail editor is flushed first, and the same window
+  is shown again next time, because destroyed WinUI windows leak native memory (ADR-015). The
+  process stays in the tray. Only **Quit** in the tray menu ends the process: it removes the tray icon, flushes
   the log and disposes the store (which drains the writer queue).
 - **Tray icon:** `Shell_NotifyIcon` on a hidden top-level Win32 window owned by the UI thread
   (ADR-012). Left-click → search; right-click → the menu in 05 § Tray. "Panel on/off" is shown
@@ -173,6 +174,24 @@ Resolved in T2.1:
 - **Idle trim.** When the last window has closed, `IdleTrim` runs one aggressive, compacting GC
   after 3 s, so the managed wrappers of a destroyed window (and the native XAML objects they hold)
   are released even though an idle tray process never triggers a GC on its own.
+
+## Library (T2.4)
+
+- **`LibraryViewModel`** (no XAML types) owns the All notes list: the query (sort, label and
+  status filters), the rows, the view mode, the selection and the empty state. Dependencies:
+  `INoteRepository`, `ILabelRepository`, `INoteEvents` (the UI-thread events of `UiNoteEvents`,
+  behind an interface so tests can raise them), `TimeProvider` and `ILogger`. It lives as long as
+  the main window, so its state survives hiding the window.
+- **`LibraryRow`** (`ObservableObject`) wraps one `Note` and exposes the display strings from
+  `LibraryFormat` (path trimming, next date, relative time; pure functions, unit-tested). An edit
+  replaces the row's note in place (ADR-017).
+- **Reloads** are coalesced: at most one `ListAsync` runs at a time, and any number of requests
+  during it cause exactly one more.
+- **`LibraryPage`** (XAML) shows the rows as a `ListView` or a `GridView`, the command bar, the
+  filter chips, and the detail pane, which hosts a `NoteEditorView`. `MainWindow` hosts the
+  `NavigationView` and the pages. The detail editor's view model comes from the same factory as
+  the compact editor's.
+- `AppShell.OpenNote(id)` shows the main window and calls `LibraryViewModel.SelectAsync(id)`.
 
 ## Markdown (REQ-007)
 

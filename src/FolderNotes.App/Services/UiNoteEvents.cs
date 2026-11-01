@@ -18,11 +18,19 @@ internal sealed class DispatcherQueueUiDispatcher(DispatcherQueue queue) : IUiDi
     public bool Post(Action action) => _queue.TryEnqueue(() => action());
 }
 
+/// <summary>Note and label change events, raised on the UI thread (02 § App shell, § Library).</summary>
+internal interface INoteEvents
+{
+    event EventHandler<NoteChangedEventArgs>? NoteChanged;
+
+    event EventHandler? LabelsChanged;
+}
+
 /// <summary>
 /// Re-raises the store's events on the UI thread (O-11, ADR-011). UI code subscribes here, never to
 /// the store, so handlers can touch XAML and never delay the writer task.
 /// </summary>
-internal sealed class UiNoteEvents : IDisposable
+internal sealed class UiNoteEvents : INoteEvents, IDisposable
 {
     private readonly INoteRepository _notes;
     private readonly ILabelRepository _labels;

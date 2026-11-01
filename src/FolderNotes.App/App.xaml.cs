@@ -96,6 +96,15 @@ public partial class App : Application
             var store = _store;
             _shell.EditorFactory = () => new NoteEditorViewModel(store, store, _identity, TimeProvider.System, uiDispatcher, _log);
         }
+
+        if (_store is not null)
+        {
+            var store = _store;
+            var events = _services.GetRequiredService<UiNoteEvents>();
+            var editors = _shell.EditorFactory!;
+            _shell.LibraryFactory = () => new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
+        }
+
         _router = _services.GetRequiredService<CommandRouter>();
 
         var tray = _services.GetRequiredService<TrayIcon>();
@@ -171,7 +180,7 @@ public partial class App : Application
             if (_shell is not null)
             {
                 await _shell.CloseEditorsAsync(); // saves pending edits (REQ-005)
-                _shell.CloseMainWindow();
+                await _shell.CloseMainWindowAsync();
             }
             if (_services is not null)
             {

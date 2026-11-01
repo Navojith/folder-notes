@@ -134,9 +134,11 @@ the main window's detail pane reuses it in T2.4.
   "This folder doesn't exist" and nothing else. The folder is resolved (02 `TryResolve`) and looked up
   with `GetByFolderAsync`; a hit opens that note (REQ-004, and REQ-001: a second "Add" opens the
   existing note). A miss opens a **draft**: `Note.CreateFor(folder)` with the folder name as the
-  title (REQ-003), selected so typing replaces it. `--open-note <id>` opens that note (also in the
-  compact window until T2.4); an unknown or deleted id shows "This note no longer exists".
+  title (REQ-003), selected so typing replaces it. `--open-note <id>` opens that note in the main window's
+  library (since T2.4, see § Library behaviour); an unknown or deleted id shows "This note no longer exists".
   If an editor for the same note or folder is already open, it's activated instead of opening a second one.
+  The same goes for a folder that doesn't exist: a second `--edit` with the same path (ignoring
+  case) activates the open "This folder doesn't exist" window (O-17).
 - **Drafts aren't saved until the first edit.** Closing an untouched draft (close button or `Esc`)
   creates nothing. `Ctrl+Enter` is an explicit save, so it creates the note even if untouched.
 - **Autosave (REQ-005).** Every change re-validates (`NoteValidator`). A valid change schedules a
@@ -182,6 +184,69 @@ the main window's detail pane reuses it in T2.4.
 - **Orphaned**: notes whose folders can't be found, with Relink… / Delete (REQ-061).
 - **Settings** (REQ-081).
 - The list and editor use a master/detail layout above 1000 px width and stack below it.
+
+#### Library behaviour (T2.4)
+
+`MainWindow` hosts a `NavigationView` (left, `PaneDisplayMode=Auto`). Items appear when their task
+lands: **All notes** (T2.4), Labels (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
+footer **Settings** (T2.8). Until T2.8 the Settings page holds only the Theme choice that the
+T2.2 token sample had (System / Light / Dark, not saved across restarts). The token sample is gone.
+
+- **What's listed.** Every live note (`ListAsync`, `State = Active`), orphaned ones included; their
+  row says "Folder not found". No paging: the list virtualizes (NFR-05 is measured in T5.5).
+- **Row (list) and card (grid) content:** the accent bar (the note's colour; the space stays empty
+  without one), the title on one line, the path trimmed in the middle (below), the status pill
+  (not for *none*), up to 3 label chips then "+n", the next date, and "Edited <relative time>".
+  The full path is in the tooltip.
+- **Path trimming** (`LibraryFormat.TrimPathMiddle`, max 36 characters in a row, 40 on a card): a
+  path that fits is unchanged. Otherwise keep the root (`D:\` or `\\server\share\`) and as many
+  trailing segments as fit, and put `…\` between them. If even the last segment doesn't fit, it's
+  cut at the end with `…`.
+- **Next date** (`LibraryFormat.NextDate`): if the note has a due date (the earlier of *review on*
+  and *safe after*; a tie counts as *review on*), show "Review 3 Nov 2026" or "Safe after 3 Nov
+  2026", with "Overdue: " in front when the date is before today. Otherwise, if *keep until* is
+  today or later, "Keep until 1 Jan 2027". Otherwise nothing. Dates use `d MMM yyyy` in the UI
+  culture.
+- **Relative time** (`LibraryFormat.Relative`): under 1 minute "just now"; under 1 hour "5 min
+  ago"; under 24 hours "3 h ago"; the previous calendar day "yesterday"; under 7 days "3 days
+  ago"; otherwise the date (`d MMM yyyy`). Local time. Future times (clock skew) show "just now".
+- **Sort** (CommandBar "Sort" menu, radio items): *Last updated* (default, newest first), *Title*
+  (A–Z, ignoring case), *Due date* (soonest first, notes without one last), *Path* (A–Z,
+  hierarchical: a folder's subfolders come right after it, so `D:\Clients\Acme` sorts before
+  `D:\ClientsOld`, O-9).
+- **Filter** (CommandBar "Filter" menu): a toggle item per label (a note must have **all** the
+  checked labels) and per status except *none* (a note must have **one** of the checked
+  statuses), plus "Clear filters". Active filters show as chips under the command bar, each with
+  a remove button ("Remove filter <name>"). The count text says "12 notes" (or "1 note") for what's
+  listed.
+- **View**: *List* or *Cards* (two toggle buttons that act as one choice).
+- Sort, filters, view and selection survive closing and reopening the main window (the window is
+  reused, 02 § App shell). They aren't saved across restarts until T2.8.
+- **Empty states.** No notes at all: a folder glyph, "No notes yet", and "Right-click a folder in
+  Explorer and choose Add folder note, or run FolderNotes --edit <folder>." Filters that match
+  nothing: "No notes match these filters" and a [Clear filters] button.
+- **Master/detail.** At 1000 px (effective pixels) and wider, the list is on the left (45 % of the
+  width, at least 400 px) and the editor on the right. Narrower, only one pane shows: selecting a
+  note (click, Enter) shows the editor with a Back button, and Back or `Alt+Left` returns to the
+  list with the note still selected. With nothing selected, the detail pane says "Select a note to
+  see it here".
+- **Detail editor.** The same `NoteEditorView` as the compact window, with a fresh
+  `NoteEditorViewModel` per selected note (`LoadByIdAsync`). Selecting another note, Back, and
+  closing the window flush the current one first, with the same rules as the compact window.
+  `Ctrl+Enter` saves now; `Esc` does nothing here. Delete shows the Undo bar; when the 10 s run out
+  the detail goes back to "Select a note".
+- **Keeping in sync (ADR-017).** Edits update their row in place (content only: an edited row
+  doesn't move or disappear because of the sort or filters until the list next reloads). A
+  deleted or purged note's row is removed (an open detail keeps its Undo bar). A note created,
+  restored, relinked or orphaned elsewhere, or any label change, reloads the list. Selection is
+  kept by note ID across reloads.
+- **`--open-note <id>`** opens the main window on All notes and selects that note, clearing the
+  filters first if they hide it. An unknown or deleted id shows "This note no longer exists" in
+  the detail pane.
+- **Row actions:** a context menu with *Open folder* (disabled when the folder is missing) and
+  *Copy path*.
+- **UIA:** a row's name is "<title>, <path>[, <status>][, labels <a, b>][, <next date>], edited
+  <relative time>" (T2.9 does the full pass).
 
 ### 4. Search palette (REQ-050..053)
 

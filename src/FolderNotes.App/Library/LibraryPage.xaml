@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- All notes (specs/05 § Library behaviour, 02 § Library): list or cards, sort, filter, master/detail. -->
+<UserControl
+    x:Class="FolderNotes.App.Library.LibraryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FolderNotes.App.Controls"
+    xmlns:domain="using:FolderNotes.Core.Domain"
+    xmlns:editor="using:FolderNotes.App.Editor"
+    xmlns:local="using:FolderNotes.App.Library">
+  <UserControl.Resources>
+    <DataTemplate x:Key="ChipTemplate" x:DataType="domain:Label">
+      <controls:LabelChip LabelName="{x:Bind Name}" ColorKey="{x:Bind Color}" />
+    </DataTemplate>
+
+    <DataTemplate x:Key="RowTemplate" x:DataType="local:LibraryRow">
+      <Grid ColumnSpacing="12" RowSpacing="2" Padding="0,8" Background="Transparent"
+            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ContextFlyout>
+          <MenuFlyout>
+            <MenuFlyoutItem Text="Open folder" Tag="{x:Bind}" Click="OnOpenFolder" IsEnabled="{x:Bind local:LibraryPage.Not(IsOrphaned), Mode=OneWay}">
+              <MenuFlyoutItem.Icon><SymbolIcon Symbol="OpenLocal" /></MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Text="Copy path" Tag="{x:Bind}" Click="OnCopyPath">
+              <MenuFlyoutItem.Icon><SymbolIcon Symbol="Copy" /></MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+          </MenuFlyout>
+        </Grid.ContextFlyout>
+        <controls:AccentBar ColorKey="{x:Bind AccentColor, Mode=OneWay}" Grid.RowSpan="3" VerticalAlignment="Stretch" />
+        <!-- Line 1: title | next date. Line 2: path | edited. Line 3: status, chips (full width). -->
+        <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}"
+                   TextTrimming="CharacterEllipsis" MaxLines="1" />
+        <Grid Grid.Column="2">
+          <TextBlock Text="{x:Bind NextDate, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                     Visibility="{x:Bind local:LibraryPage.Hidden(IsOverdue), Mode=OneWay}" />
+          <TextBlock Text="{x:Bind NextDate, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center"
+                     Foreground="{ThemeResource SystemFillColorCriticalBrush}" Visibility="{x:Bind IsOverdue, Mode=OneWay}" />
+        </Grid>
+        <TextBlock Grid.Row="1" Grid.Column="1" Text="{x:Bind RowPath, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" MaxLines="1"
+                   ToolTipService.ToolTip="{x:Bind PathDisplay, Mode=OneWay}" />
+        <StackPanel Grid.Row="1" Grid.Column="2" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <TextBlock Text="{x:Bind FolderMissingText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="{x:Bind IsOrphaned, Mode=OneWay}" />
+          <TextBlock Text="{x:Bind EditedText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+        <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+          <controls:StatusPill Status="{x:Bind Status, Mode=OneWay}" />
+          <ItemsRepeater ItemsSource="{x:Bind Chips, Mode=OneWay}" ItemTemplate="{StaticResource ChipTemplate}">
+            <ItemsRepeater.Layout><StackLayout Orientation="Horizontal" Spacing="4" /></ItemsRepeater.Layout>
+          </ItemsRepeater>
+          <TextBlock Text="{x:Bind MoreLabels, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
+
+    <DataTemplate x:Key="CardTemplate" x:DataType="local:LibraryRow">
+      <Grid Width="280" Height="150" ColumnSpacing="12" Padding="12" CornerRadius="{StaticResource CardCornerRadius}"
+            BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.ContextFlyout>
+          <MenuFlyout>
+            <MenuFlyoutItem Text="Open folder" Tag="{x:Bind}" Click="OnOpenFolder" IsEnabled="{x:Bind local:LibraryPage.Not(IsOrphaned), Mode=OneWay}">
+              <MenuFlyoutItem.Icon><SymbolIcon Symbol="OpenLocal" /></MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+            <MenuFlyoutItem Text="Copy path" Tag="{x:Bind}" Click="OnCopyPath">
+              <MenuFlyoutItem.Icon><SymbolIcon Symbol="Copy" /></MenuFlyoutItem.Icon>
+            </MenuFlyoutItem>
+          </MenuFlyout>
+        </Grid.ContextFlyout>
+        <controls:AccentBar ColorKey="{x:Bind AccentColor, Mode=OneWay}" VerticalAlignment="Stretch" />
+        <StackPanel Grid.Column="1" Spacing="2">
+          <TextBlock Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}"
+                     TextTrimming="CharacterEllipsis" MaxLines="1" />
+          <TextBlock Text="{x:Bind CardPath, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" MaxLines="1"
+                     ToolTipService.ToolTip="{x:Bind PathDisplay, Mode=OneWay}" />
+          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,6,0,6">
+            <controls:StatusPill Status="{x:Bind Status, Mode=OneWay}" />
+            <ItemsRepeater ItemsSource="{x:Bind Chips, Mode=OneWay}" ItemTemplate="{StaticResource ChipTemplate}">
+              <ItemsRepeater.Layout><StackLayout Orientation="Horizontal" Spacing="4" /></ItemsRepeater.Layout>
+            </ItemsRepeater>
+            <TextBlock Text="{x:Bind MoreLabels, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock Text="{x:Bind NextDate, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Visibility="{x:Bind local:LibraryPage.Hidden(IsOverdue), Mode=OneWay}" />
+          <TextBlock Text="{x:Bind NextDate, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource SystemFillColorCriticalBrush}" Visibility="{x:Bind IsOverdue, Mode=OneWay}" />
+          <TextBlock Text="{x:Bind EditedText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          <TextBlock Text="{x:Bind FolderMissingText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                     Foreground="{ThemeResource SystemFillColorCautionBrush}" Visibility="{x:Bind IsOrphaned, Mode=OneWay}" />
+        </StackPanel>
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid x:Name="Root" SizeChanged="OnSizeChanged">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition x:Name="MasterColumn" Width="*" />
+      <ColumnDefinition x:Name="DetailColumn" Width="0" />
+    </Grid.ColumnDefinitions>
+
+    <!-- Master: header, command bar, filter chips, list/cards, empty states -->
+    <Grid x:Name="MasterPane" Padding="24,16,16,0" RowSpacing="{StaticResource SpacingM}">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="All notes" Style="{StaticResource SubtitleTextBlockStyle}" />
+        <TextBlock x:Name="CountText" AutomationProperties.AutomationId="NoteCount" VerticalAlignment="Bottom" Margin="0,0,0,3"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+
+      <CommandBar Grid.Row="1" HorizontalAlignment="Left" DefaultLabelPosition="Right" IsDynamicOverflowEnabled="False"
+                  Background="Transparent">
+        <AppBarButton x:Name="SortButton" Label="Sort" AutomationProperties.AutomationId="Sort">
+          <AppBarButton.Icon><SymbolIcon Symbol="Sort" /></AppBarButton.Icon>
+          <AppBarButton.Flyout><MenuFlyout x:Name="SortMenu" /></AppBarButton.Flyout>
+        </AppBarButton>
+        <AppBarButton x:Name="FilterButton" Label="Filter" AutomationProperties.AutomationId="Filter">
+          <AppBarButton.Icon><SymbolIcon Symbol="Filter" /></AppBarButton.Icon>
+          <AppBarButton.Flyout><MenuFlyout x:Name="FilterMenu" Opening="OnFilterMenuOpening" /></AppBarButton.Flyout>
+        </AppBarButton>
+        <AppBarSeparator />
+        <AppBarToggleButton x:Name="ListToggle" Label="List" AutomationProperties.AutomationId="ViewList" Click="OnViewToggle">
+          <AppBarToggleButton.Icon><SymbolIcon Symbol="List" /></AppBarToggleButton.Icon>
+        </AppBarToggleButton>
+        <AppBarToggleButton x:Name="CardsToggle" Label="Cards" AutomationProperties.AutomationId="ViewCards" Click="OnViewToggle">
+          <AppBarToggleButton.Icon><SymbolIcon Symbol="ViewAll" /></AppBarToggleButton.Icon>
+        </AppBarToggleButton>
+      </CommandBar>
+
+      <controls:WrapPanel x:Name="FilterChips" Grid.Row="2" Spacing="6" AutomationProperties.AutomationId="ActiveFilters" />
+
+      <Grid Grid.Row="3">
+        <ListView x:Name="NoteList" AutomationProperties.AutomationId="NoteList" AutomationProperties.Name="Notes"
+                  SelectionMode="Single" IsItemClickEnabled="True" ItemTemplate="{StaticResource RowTemplate}"
+                  SelectionChanged="OnSelectionChanged" ItemClick="OnItemClick" Padding="0,0,0,16" />
+        <GridView x:Name="NoteGrid" AutomationProperties.AutomationId="NoteCards" AutomationProperties.Name="Notes"
+                  SelectionMode="Single" IsItemClickEnabled="True" ItemTemplate="{StaticResource CardTemplate}"
+                  SelectionChanged="OnSelectionChanged" ItemClick="OnItemClick" Padding="0,0,0,16" Visibility="Collapsed" />
+
+        <StackPanel x:Name="EmptyPanel" AutomationProperties.AutomationId="EmptyState" Spacing="{StaticResource SpacingM}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360" Visibility="Collapsed">
+          <FontIcon Glyph="&#xE8B7;" FontSize="48" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+          <TextBlock x:Name="EmptyTitle" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" TextAlignment="Center" />
+          <TextBlock x:Name="EmptyMessage" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" TextAlignment="Center"
+                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          <Button x:Name="EmptyClearButton" Content="Clear filters" HorizontalAlignment="Center"
+                  AutomationProperties.AutomationId="EmptyClearFilters" Click="OnClearFilters" />
+        </StackPanel>
+      </Grid>
+    </Grid>
+
+    <!-- Detail: the editor for the selected note -->
+    <Grid x:Name="DetailPane" Grid.Column="1" Padding="24,16,24,20" RowSpacing="{StaticResource SpacingM}"
+          BorderThickness="1,0,0,0" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+      <Button x:Name="BackButton" AutomationProperties.AutomationId="Back" AutomationProperties.Name="Back to the list"
+              Click="OnBack" Visibility="Collapsed" Style="{StaticResource NavigationBackButtonNormalStyle}">
+        <Button.KeyboardAccelerators>
+          <KeyboardAccelerator Key="Left" Modifiers="Menu" />
+        </Button.KeyboardAccelerators>
+      </Button>
+      <editor:NoteEditorView x:Name="DetailView" Grid.Row="1" Visibility="Collapsed" />
+      <TextBlock x:Name="NoSelectionText" Grid.Row="1" Text="Select a note to see it here" AutomationProperties.AutomationId="NoSelection"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource BodyTextBlockStyle}"
+                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </Grid>
+  </Grid>
+</UserControl>

@@ -184,7 +184,8 @@ change); hide one window and reuse it.
 next `NoteEditorViewModel` to it (02 § Editor). Only extra concurrent editors are destroyed.
 **Consequences:** Memory is flat over repeated use (≈65 MB private working set / ≈83 MB private
 bytes after 8 cycles, ±2 MB). The first editor's one-time cost (≈33 MB over tray-only) stays for
-the process lifetime, which is the REQ-080 gap recorded as O-15 (resolved by ADR-016). A reused window must reset
+the process lifetime, which is the REQ-080 gap recorded as O-15 (resolved by ADR-016).
+*Extended in T2.4:* the main window is hidden and reused the same way (02 § App shell). A reused window must reset
 per-session UI state (`NoteEditorView.ResetForNewSession`). The main window (T2.4) should get the
 same treatment once it holds the library.
 
@@ -215,3 +216,20 @@ runtime code. A looser target can creep, so the check also fails on growth (≤ 
 ≤ 8 MB over the 120-cycle soak) and is run before ticking any task that adds a window. First run
 (Release, 2026-11-01): tray-only 32.2 MB; editor open ≤ 66.6 MB; after close ≤ 67.1 MB; growth
 0.4 MB; idle CPU 0 % tray-only and 0.05 % after use. All pass.
+
+## ADR-017: The library updates edited rows in place and reloads only for structural changes — *accepted (T2.4, 2026-11-01)*
+
+**Context:** The detail pane autosaves every 500 ms while the user types (REQ-005), and each save
+raises `NoteChanged`. Reloading the whole list on every save means up to 10k rows read per save
+(NFR-05), and with the default *Last updated* sort the row being edited would jump to the top and
+lose its place under the user's pointer. Keeping the list exactly sorted and filtered after every
+change would need the SQL ordering and filters duplicated in C#.
+**Decision:** `Updated` re-reads only that note and replaces the row's content in place; the row
+keeps its position and stays even if it no longer matches the filters. `Deleted` / `Purged` remove
+the row. `Created`, `Restored`, `Relinked`, `OrphanStateChanged` and `LabelsChanged` reload the
+list through `ListAsync`, coalesced so at most one reload runs and at most one more is queued.
+Changing the sort or filters, or reopening the window, also reloads.
+**Consequences:** Typing in the detail pane costs one `GetByIdAsync` per save, and the row stays
+put. The order can be stale after edits (an edited note isn't moved to the top) until the next
+reload, which is the expected behaviour in list+detail apps. The ordering and filter logic stays
+in one place (`NoteFilterSql`).

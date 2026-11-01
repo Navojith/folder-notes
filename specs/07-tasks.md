@@ -135,8 +135,26 @@ superseded), and specs 03/04 reflect what was learned.
   delete → Undo → delete → window closes itself after 10 s; a reused window shows the next
   folder's fresh session. Found and fixed live: the TextBox's bare CR line breaks (now stored as
   LF), and a native memory leak per destroyed window (ADR-015). REQ-080 after using the editor is
-  65 MB, over the 60 MB target: O-15, decision pending.*
-- [ ] **T2.4 🧱 Library view** (REQ-054). List/grid, sort, filter, master/detail.
+  65 MB, over the 60 MB target: O-15, resolved by ADR-016 (per-state budgets).*
+- [x] **T2.4 🧱 Library view** (REQ-054). List/grid, sort, filter, master/detail. See 05 § Library
+  behaviour, 02 § Library, ADR-017.
+  *Done when:* view-model tests cover load, every sort, label (all-of) and status (any-of)
+  filters, clear filters, empty states, in-place edits, removal on delete, reloads on
+  create/restore/label change (coalesced) and selection kept by ID; `LibraryFormat` tests cover
+  path trimming, next date and relative time; a Core test shows the hierarchical path sort (O-9);
+  checked live on Release: the list and cards show seeded notes, sort and filters work, the
+  detail pane edits and autosaves, the narrow layout's Back works, `--open-note` selects the
+  note, and `eng/perf-check.ps1` (with a main-window stage) passes REQ-080 / NFR-06. Also: a
+  missing folder's `--edit` reuses its window (O-17).
+  *Done 2026-11-01: `LibraryViewModel` / `LibraryRow` / `LibraryFormat` (ADR-017), `LibraryPage`
+  (list + cards, sort and filter menus, filter chips, empty states, master/detail with the shared
+  `NoteEditorView`), `AccentBar`, NavigationView main window (hidden and reused, ADR-015) with a
+  Settings stub for the theme, `INoteEvents`, `FolderLauncher`; hierarchical path sort in Core
+  (O-9). 43 new tests (42 App: view model and formatting; 1 Core). Checked live on Release via UI
+  Automation against seeded notes: all three sorts, label filter + chip removal, detail edit →
+  "Saved" and the row updated in place, cards, the narrow layout's Back, `--open-note` clearing a
+  hiding filter, reopen keeps state on the same window, and two `--edit` of a missing folder →
+  one window (O-17). `perf-check` (8 editor + 8 main-window cycles) passes: tray-only 32.5 MB; editor open ≤ 68.1 MB; main window with the library ≤ 81.8 MB open and ≤ 81.4 MB after close; no growth (-0.8 / -2.8 MB); idle CPU 0 %.*
 - [ ] **T2.5 🧱 Labels manager** (REQ-012, 013).
 - [ ] **T2.6 🧱 Search palette + global hotkey** (REQ-050…053).
 - [ ] **T2.7 🧱 Orphaned view + relink** (REQ-061).
@@ -189,7 +207,8 @@ zero Explorer crashes.
 
 ## Phase 5: Reminders, portability, polish
 
-- [ ] **T5.1 🧱 ReminderService + toasts** (REQ-021, 022, 024): scheduling, snooze, once-only.
+- [ ] **T5.1 🧱 ReminderService + toasts** (REQ-021, 022, 024): scheduling, snooze, once-only,
+  and the main window's *Due & reminders* page (overdue / next 30 days / later, 05 § Main window).
 - [ ] **T5.2 🧱 Sidecar sync** (REQ-071, 072): write, read, conflict dialog.
 - [ ] **T5.3 🧱 Daily DB backup** (REQ-084).
 - [ ] **T5.4 🧱 Markdown preview polish + checkboxes toggle from the panel** (REQ-007).

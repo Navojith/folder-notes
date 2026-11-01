@@ -4,20 +4,22 @@
   Starts a fresh tray process and measures, in order:
     1. tray-only idle: private working set, private bytes, CPU over an idle window
     2. N editor open/close cycles (default 8): memory with the editor open, and 10 s after close
-    3. idle CPU again after the windows were used
+    3. N main window open/close cycles (default 8): the library on All notes, open and 10 s after close
+    4. idle CPU again after the windows were used
   Then checks the budgets and the cycle-to-cycle growth, prints a table, and exits 1 on a failure.
 
   The editor is opened with `--edit` on an empty scratch folder (-Folder) and closed without typing, so it is a
   draft that is never saved (ADR-014): the check leaves nothing in the notes database.
 
   Run against a Release build with Windows PowerShell 5.1:
-    powershell -File eng\perf-check.ps1                       # 8 cycles, ~4 minutes
-    powershell -File eng\perf-check.ps1 -Cycles 120           # extended session (~40 minutes)
+    powershell -File eng\perf-check.ps1                       # 8 editor + 8 main window cycles, ~7 minutes
+    powershell -File eng\perf-check.ps1 -Cycles 120 -GrowthBudgetMB 8   # extended session (~30 minutes)
   It kills any running FolderNotes process first.
 #>
 param(
     [string]$Exe = (Join-Path $PSScriptRoot '..\src\FolderNotes.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\FolderNotes.exe'),
     [int]$Cycles = 8,
+    [int]$MainCycles = 8,
     [string]$Folder = 'C:\Temp\FolderNotesPerf\perf-check',
     [int]$IdleSeconds = 60,
     # Budgets (REQ-080 / NFR-06). Initial targets; re-baselined after Phase 3 (O-16).
@@ -58,14 +60,37 @@ function IdleCpu([int]$seconds) {
     $p.Refresh(); $t1 = $p.TotalProcessorTime
     [math]::Round(100 * ($t1 - $t0).TotalMilliseconds / $sw.Elapsed.TotalMilliseconds, 3)
 }
-function WaitWindow {
+function WaitWindow([string]$windowTitle) {
     $deadline = (Get-Date).AddSeconds(15)
     do {
-        $h = [PerfU]::FindWindow([NullString]::Value, $title)
+        # WinUI windows only: the tray's hidden message window is also titled "Folder Notes".
+        $h = [PerfU]::FindWindow('WinUIDesktopWin32WindowClass', $windowTitle)
         if ($h -ne [IntPtr]::Zero -and [PerfU]::IsWindowVisible($h)) { return $h }
         Start-Sleep -Milliseconds 100
     } until ((Get-Date) -gt $deadline)
-    throw "editor window '$title' did not appear"
+    throw "window '$windowTitle' did not appear"
+}
+function Cycles([int]$count, [string]$arguments, [string]$windowTitle, [string]$name) {
+    $result = @()
+    for ($i = 1; $i -le $count; $i++) {
+        if ($name -eq 'editor') { New-Item -ItemType Directory -Force $folder | Out-Null }  # must exist, or the editor shows 'folder missing'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        if ($arguments) { Start-Process $Exe $arguments } else { Start-Process $Exe }
+        $h = WaitWindow $windowTitle
+        $openMs = $sw.ElapsedMilliseconds
+        Start-Sleep -Seconds 2
+        $open = Mem
+        [PerfU]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # WM_CLOSE
+        Start-Sleep -Seconds 10
+        $closed = Mem
+        $result += [pscustomobject]@{ Cycle = $i; OpenMs = $openMs; OpenWs = $open.WsMB; OpenPriv = $open.PrivMB; ClosedWs = $closed.WsMB; ClosedPriv = $closed.PrivMB }
+        Write-Host ("{0,-6} {1,3}:     open {2} / {3} MB, closed {4} / {5} MB (window in {6} ms)" -f $name, $i, $open.WsMB, $open.PrivMB, $closed.WsMB, $closed.PrivMB, $openMs)
+    }
+    return ,$result
+}
+function Growth($rows) {
+    $base = if ($rows.Count -ge 2) { $rows[1].ClosedPriv } else { $rows[0].ClosedPriv }
+    [math]::Round($rows[-1].ClosedPriv - $base, 1)
 }
 
 Get-Process FolderNotes -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -76,35 +101,29 @@ $tray = Mem
 $trayCpu = IdleCpu $IdleSeconds
 Write-Host ("tray only:      {0} MB working set, {1} MB private bytes, {2}% CPU idle" -f $tray.WsMB, $tray.PrivMB, $trayCpu)
 
-$rows = @()
-for ($i = 1; $i -le $Cycles; $i++) {
-    New-Item -ItemType Directory -Force $folder | Out-Null  # must exist, or the editor shows 'folder missing'
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    Start-Process $Exe "--edit `"$folder`""
-    $h = WaitWindow
-    $openMs = $sw.ElapsedMilliseconds
-    Start-Sleep -Seconds 2
-    $open = Mem
-    [PerfU]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # WM_CLOSE
-    Start-Sleep -Seconds 10
-    $closed = Mem
-    $rows += [pscustomobject]@{ Cycle = $i; OpenMs = $openMs; OpenWs = $open.WsMB; OpenPriv = $open.PrivMB; ClosedWs = $closed.WsMB; ClosedPriv = $closed.PrivMB }
-    Write-Host ("cycle {0,3}:      open {1} / {2} MB, closed {3} / {4} MB (window in {5} ms)" -f $i, $open.WsMB, $open.PrivMB, $closed.WsMB, $closed.PrivMB, $openMs)
-}
+$rows = Cycles $Cycles "--edit `"$folder`"" $title 'editor'
+$mainRows = if ($MainCycles -gt 0) { Cycles $MainCycles '' 'Folder Notes' 'main' } else { @() }
 $usedCpu = IdleCpu $IdleSeconds
 Write-Host ("after use:      {0}% CPU idle" -f $usedCpu)
 Get-Process FolderNotes | Stop-Process -Force
 
 $maxOpenWs = ($rows | Measure-Object OpenWs -Maximum).Maximum
 $maxClosedWs = ($rows | Measure-Object ClosedWs -Maximum).Maximum
-$base = if ($Cycles -ge 2) { $rows[1].ClosedPriv } else { $rows[0].ClosedPriv }
-$growth = [math]::Round($rows[-1].ClosedPriv - $base, 1)
+$growth = Growth $rows
 
 $checks = @(
     [pscustomobject]@{ Check = 'tray-only working set'; Budget = "< $TrayBudgetMB MB"; Measured = "$($tray.WsMB) MB"; Pass = $tray.WsMB -lt $TrayBudgetMB }
     [pscustomobject]@{ Check = 'editor open working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxOpenWs MB"; Pass = $maxOpenWs -lt $EditorBudgetMB }
     [pscustomobject]@{ Check = 'after close working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxClosedWs MB"; Pass = $maxClosedWs -lt $EditorBudgetMB }
     [pscustomobject]@{ Check = "private bytes growth, cycle 2 -> $Cycles"; Budget = "<= $GrowthBudgetMB MB"; Measured = "$growth MB"; Pass = $growth -le $GrowthBudgetMB }
+    if ($mainRows.Count -gt 0) {
+        $maxMainOpen = ($mainRows | Measure-Object OpenWs -Maximum).Maximum
+        $maxMainClosed = ($mainRows | Measure-Object ClosedWs -Maximum).Maximum
+        $mainGrowth = Growth $mainRows
+        [pscustomobject]@{ Check = 'main window open working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxMainOpen MB"; Pass = $maxMainOpen -lt $EditorBudgetMB }
+        [pscustomobject]@{ Check = 'main window closed working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxMainClosed MB"; Pass = $maxMainClosed -lt $EditorBudgetMB }
+        [pscustomobject]@{ Check = "main window growth, cycle 2 -> $MainCycles"; Budget = "<= $GrowthBudgetMB MB"; Measured = "$mainGrowth MB"; Pass = $mainGrowth -le $GrowthBudgetMB }
+    }
     [pscustomobject]@{ Check = 'idle CPU, tray only'; Budget = "< $IdleCpuBudgetPct %"; Measured = "$trayCpu %"; Pass = $trayCpu -lt $IdleCpuBudgetPct }
     [pscustomobject]@{ Check = 'idle CPU, after use'; Budget = "< $IdleCpuBudgetPct %"; Measured = "$usedCpu %"; Pass = $usedCpu -lt $IdleCpuBudgetPct }
 )

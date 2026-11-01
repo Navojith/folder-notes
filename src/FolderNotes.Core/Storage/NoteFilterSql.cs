@@ -89,7 +89,8 @@ internal static class NoteFilterSql
     {
         NoteSort.Title => "n.title COLLATE NOCASE, n.id",
         NoteSort.DueDate => $"({SqliteNoteStore.DueExpression}) IS NULL, {SqliteNoteStore.DueExpression}, n.title COLLATE NOCASE, n.id",
-        NoteSort.Path => "n.path_norm, n.id",
+        // Hierarchical (03 § Repository rules, O-9): '\' sorts below every other character.
+        NoteSort.Path => @"replace(n.path_norm, '\', char(1)), n.id",
         _ => "n.updated_at DESC, n.id",
     };
 

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using FolderNotes.App.Controls;
 using FolderNotes.App.Themes;
 using FolderNotes.Core.Domain;
@@ -348,16 +347,7 @@ public sealed partial class NoteEditorView : UserControl
         }
     }
 
-    private void OnOpenFolder(object sender, RoutedEventArgs e)
-    {
-        if (_vm?.FolderPath is not { Length: > 0 } path || !Directory.Exists(path))
-        {
-            return;
-        }
-
-        // explorer.exe does its own argument parsing; a quoted drive root ("D:\") is fine there.
-        using var _ = Process.Start(new ProcessStartInfo("explorer.exe", "\"" + path + "\"") { UseShellExecute = false });
-    }
+    private void OnOpenFolder(object sender, RoutedEventArgs e) => Services.FolderLauncher.Open(_vm?.FolderPath);
 
     private async void OnDelete(object sender, RoutedEventArgs e)
     {

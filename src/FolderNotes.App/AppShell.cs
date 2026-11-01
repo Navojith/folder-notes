@@ -7,8 +7,8 @@ using Serilog;
 namespace FolderNotes.App;
 
 /// <summary>
-/// Owns the windows: the main window and the compact editors, created on demand and destroyed on
-/// close so the tray process stays light (REQ-080, specs/02 § App shell, § Editor). UI thread only.
+/// Owns the windows: the main window and the compact editors, created on demand and hidden for
+/// reuse on close (ADR-015; specs/02 § App shell, § Editor, § Library). UI thread only.
 /// </summary>
 internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
 {
@@ -22,12 +22,15 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Creates an editor session. Null when the database couldn't be opened.</summary>
     public Func<NoteEditorViewModel>? EditorFactory { get; set; }
 
+    /// <summary>Creates the main window's library. Null when the database couldn't be opened.</summary>
+    public Func<Library.LibraryViewModel>? LibraryFactory { get; set; }
+
     public int OpenEditorCount => _editors.Count;
 
     /// <summary>Runs once the last window has closed (REQ-080).</summary>
     public Services.IdleTrim? IdleTrim { get; set; }
 
-    private bool AllClosed => _main is null && _editors.Count == 0;
+    private bool AllClosed => (_main is null || !_main.IsShown) && _editors.Count == 0;
 
     private void OnWindowClosed()
     {
@@ -48,7 +51,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
         }
     }
 
-    public bool IsMainWindowOpen => _main is not null;
+    public bool IsMainWindowOpen => _main?.IsShown == true;
 
     public void ShowMainWindow() => Show(null);
 
@@ -58,11 +61,39 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     // T2.6 replaces this with the search palette.
     public void OpenSearch(string query) => Show(query.Length == 0 ? "Search requested" : $"Search requested: {query}");
 
-    // T2.4 moves this to the main window's detail pane.
-    public void OpenNote(Guid noteId) =>
-        OpenEditorWindow(vm => vm.LoadByIdAsync(noteId), $"--open-note {noteId}");
+    /// <summary><c>--open-note</c>: the main window's library selects the note (05 § Library behaviour).</summary>
+    public async void OpenNote(Guid noteId)
+    {
+        var main = Show(null);
+        if (main.LibraryViewModel is not { } library)
+        {
+            return; // no database: the window shows the startup error
+        }
 
-    public void CloseMainWindow() => _main?.Close();
+        main.ShowLibrary();
+        try
+        {
+            await library.OpenNoteAsync(noteId);
+        }
+#pragma warning disable CA1031 // Tell the user instead of crashing the tray.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Opening note {NoteId} in the library failed", noteId);
+            main.ShowError($"Couldn't open the note: {ex.Message}");
+        }
+    }
+
+    /// <summary>Quit: flush the library's editor and destroy the main window.</summary>
+    public async Task CloseMainWindowAsync()
+    {
+        if (_main is { } main)
+        {
+            _main = null;
+            await main.CloseForGoodAsync();
+            main.LibraryViewModel?.Dispose();
+        }
+    }
 
     /// <summary>Quit: every editor saves what it has (REQ-005) and closes.</summary>
     public async Task CloseEditorsAsync()
@@ -102,11 +133,16 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             return;
         }
 
-        // One editor per note / folder (05 § Editor behaviour).
-        var existing = vm.State == EditorState.Editing
-            ? _editors.FirstOrDefault(w => w.ViewModel.State is EditorState.Editing or EditorState.Deleted
-                && (w.ViewModel.NoteId == vm.NoteId || string.Equals(w.ViewModel.FolderKey, vm.FolderKey, StringComparison.Ordinal)))
-            : null;
+        // One editor per note / folder (05 § Editor behaviour), and per missing folder path (O-17).
+        var existing = vm.State switch
+        {
+            EditorState.Editing => _editors.FirstOrDefault(w => w.ViewModel.State is EditorState.Editing or EditorState.Deleted
+                && (w.ViewModel.NoteId == vm.NoteId || string.Equals(w.ViewModel.FolderKey, vm.FolderKey, StringComparison.Ordinal))),
+            EditorState.Missing => _editors.FirstOrDefault(w => w.ViewModel.State == EditorState.Missing
+                && w.ViewModel.FolderPath.Length > 0
+                && string.Equals(w.ViewModel.FolderPath, vm.FolderPath, StringComparison.OrdinalIgnoreCase)),
+            _ => null,
+        };
         if (existing is not null)
         {
             vm.Dispose();
@@ -173,20 +209,19 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
         window.ShowAndFocus();
     }
 
-    private void Show(string? request)
+    private MainWindow Show(string? request)
     {
         if (_main is null)
         {
-            var window = _main = new MainWindow(_theme);
+            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), _log);
             _theme.Register(window);
-            window.Closed += (_, _) =>
+            window.Hidden += (_, _) =>
             {
-                _theme.Unregister(window);
-                _main = null;
-                _log.Debug("Main window closed; staying in the tray");
+                _log.Debug("Main window hidden; staying in the tray");
                 OnWindowClosed();
             };
-            _main.ShowError(_startupError);
+            window.Closed += (_, _) => _theme.Unregister(window);
+            window.ShowError(_startupError);
         }
 
         if (request is not null)
@@ -194,11 +229,22 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             _main.ShowRequest(request);
         }
 
-        if (_main.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
-        {
-            presenter.Restore();
-        }
+        _ = ShowMainAsync(_main);
+        return _main;
+    }
 
-        _main.Activate();
+    private async Task ShowMainAsync(MainWindow window)
+    {
+        try
+        {
+            await window.ShowAsync();
+        }
+#pragma warning disable CA1031 // A failed first load shows in the window rather than crashing the tray.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Loading the library failed");
+            window.ShowError($"Couldn't load the notes: {ex.Message}");
+        }
     }
 }

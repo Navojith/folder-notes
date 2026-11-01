@@ -209,6 +209,9 @@ A database with a *newer* version than the app knows is opened read-only and rep
 - Upserting a soft-deleted note fails. Restore it first.
 - Restore fails with `DuplicateFolderNoteException` if another live note has taken the folder in the meantime.
 - Soft-deleted notes are purged 30 days after `deleted_at` (`PurgeDeletedAsync`).
+- **Path sort is hierarchical** (`NoteSort.Path`, REQ-054, O-9): it orders by `path_norm` with every
+  `\` replaced by `char(1)`, so a folder's subfolders come right after it and before any sibling
+  whose name merely starts the same (`D:\CLIENTS\ACME` before `D:\CLIENTSOLD`). Ties go by `id`.
 
 ## Tooltip read path (shell extension, REQ-040/041)
 
