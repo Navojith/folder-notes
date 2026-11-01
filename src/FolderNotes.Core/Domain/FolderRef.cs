@@ -19,6 +19,19 @@ public sealed record FolderRef(
     /// <summary>True when the folder can be tracked across rename/move by file ID (REQ-060).</summary>
     public bool HasFileId => VolumeSerial is not null && FileId is not null;
 
+    /// <summary>
+    /// True when both refs bind the same folder as stored: same <see cref="PathNorm"/> and, when
+    /// tracked, the same volume serial and file ID (the store keeps neither for untracked refs). The
+    /// display spelling and volume kind don't count. Used for the conditional writes of ADR-020.
+    /// </summary>
+    public bool SameBindingAs(FolderRef other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return string.Equals(PathNorm, other.PathNorm, StringComparison.Ordinal)
+            && string.Equals(HasFileId ? VolumeSerial : null, other.HasFileId ? other.VolumeSerial : null, StringComparison.Ordinal)
+            && string.Equals(HasFileId ? FileId : null, other.HasFileId ? other.FileId : null, StringComparison.Ordinal);
+    }
+
     /// <summary>The last path segment, used as the suggested title (REQ-003).</summary>
     public string FolderName
     {

@@ -426,7 +426,16 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
                 }
 
                 break;
-            default: // Created, Restored, Relinked, OrphanStateChanged
+            case NoteChangeKind.Relinked or NoteChangeKind.OrphanStateChanged:
+                var reload = ReloadAsync();
+                if (Detail is { } detail && detail.NoteId == e.NoteId)
+                {
+                    await detail.RefreshFolderAsync(); // ADR-020
+                }
+
+                await reload;
+                break;
+            default: // Created, Restored
                 await ReloadAsync();
                 break;
         }

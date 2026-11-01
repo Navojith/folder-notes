@@ -58,6 +58,9 @@ the folder's or starts with the folder's `path_norm + "\"`.
 1. Read `(volume_serial, file_id)` for the folder. If a note has that pair, **return it** (and,
    in the app only, update `path_norm`/`path_display` if they differ: the folder was renamed or moved).
 2. Otherwise, look up by `path_norm`. If a note matches by path but has a *different* `file_id`:
+   - If the folder is on a **different volume** (`volume_serial` differs: another drive mounted
+     at the same letter, a reformatted drive), it's a different folder. Return **no note** and
+     re-bind nothing (ADR-020).
    - If the stored `file_id` still resolves (`OpenFileById`) to a live folder outside the Recycle
      Bin, the original folder **moved away** and this is a different folder at the old path.
      Return **no note**.
@@ -68,12 +71,46 @@ the folder's or starts with the folder's `path_norm + "\"`.
 3. Otherwise, there's no note.
 
 The shell extension runs steps 1 and 2 read-only. For the step 2 decision, it returns the note
-only if the stored `file_id` doesn't resolve. Re-binding is left to the app.
+only if the volume serial matches and the stored `file_id` doesn't resolve. Re-binding is left to
+the app. Every re-bind is conditional on the note's binding not having changed since it was read
+(see § Relink rules).
 
-**Orphan detection** (background, at startup, then every 6 h, and on demand): for each note, if the
-path doesn't exist, try `OpenFileById(volume, file_id)` → `GetFinalPathNameByHandle` to find the
-new path. If it resolves under `\$Recycle.Bin\`, mark the note **orphaned (in Recycle Bin)**
-rather than relinking it. If it doesn't resolve, set `orphaned_at`.
+**Orphan detection** (T2.7, `OrphanScanner`; at startup, then every 6 h, when the Orphaned page
+opens, and on demand with *Check again*). Each live note is first **classified** from the file
+system alone (no writes), then the result is **applied** with conditional writes:
+
+| Folder state | How it's decided | Applied |
+|---|---|---|
+| `Present` | the folder is at the stored path (by file ID, or by path for path-only notes) | clear `orphaned_at` if set |
+| `Moved` | `Locate` finds the file ID at another path, and resolving that path gives the same volume + file ID | re-bind to the new path |
+| `Recreated` | the file ID is gone (`NotFound`) or in the Recycle Bin, and a folder exists at the stored path **on the same volume** (ADR-009) | re-bind to that folder |
+| `InRecycleBin` | the file ID resolves under `\$Recycle.Bin\` and nothing is at the stored path | orphan (reason: in the Recycle Bin) |
+| `DriveUnavailable` | the volume with the stored serial isn't mounted (`Locate` → `VolumeNotMounted`), or a path-only note's drive root / share doesn't exist | orphan (reason: drive not connected) |
+| `Missing` | anything else: the folder was deleted, or moved where its ID can't follow (another drive) | orphan (reason: not found) |
+
+- A re-bind that hits another live note on the target path or file ID (`DuplicateFolderNoteException`)
+  changes **neither** note: the moving note is orphaned instead (outcome `Conflict`; reason
+  "another note is attached there"). Nothing is merged or taken over automatically.
+- A note whose binding or orphan state changed between the read and the write (a concurrent
+  relink, an editor) is skipped; the next check sees the new state.
+- An orphan whose folder comes back (drive reconnected, folder restored from the Recycle Bin) is
+  recovered by the next check.
+- The scan never touches title, body, labels, status, dates or `updated_at`.
+
+**Relink rules** (T2.7, REQ-061 *Relink…*):
+- `RelinkAsync(id, newFolder, expectedFolder)` binds the note to `newFolder` and clears
+  `orphaned_at`, in one transaction. With `expectedFolder`, it first checks that the stored binding
+  (`path_norm`, `volume_serial`, `file_id`) still equals it, else throws
+  `NoteBindingChangedException` and changes nothing. All app callers pass it.
+- Refused (nothing changes): the note is soft-deleted or missing (`KeyNotFoundException`); another
+  live note has the target path or file ID (`DuplicateFolderNoteException`, REQ-001).
+- Checked before the write by `RelinkTarget.Check` (Core): the picked path must be a valid,
+  existing folder (not a file) outside the Recycle Bin. If its name differs from the note's
+  current folder name (ignoring case), the app asks first.
+- `SetOrphanedAsync(id, orphaned, expectedFolder)` follows the same `expectedFolder` rule.
+- **Undo** of a relink = relink back to the previous binding (expecting the new one), then mark it
+  orphaned again if it was. `orphaned_at` then holds the time of the undo.
+- Neither changes `updated_at` (a relink isn't an edit), title, body, labels, status or dates.
 
 ### S4 findings (2026-10-31, Windows 11 23H2 build 22631, NTFS)
 
@@ -202,6 +239,13 @@ A database with a *newer* version than the app knows is opened read-only and rep
 **Repository rules:**
 - Upsert sets `updated_at` to now. On first insert it keeps `created_at` from the note. Import (T1.7)
   keeps both timestamps.
+- **Upsert never changes an existing note's folder binding or orphan state** (T2.7, ADR-020): for a
+  note that's already stored, `path_norm`, `path_display`, `volume_serial`, `file_id`,
+  `volume_kind` and `orphaned_at` stay as stored, and the returned note carries the stored values.
+  Only the lookup's re-binding, the orphan scan, `RelinkAsync` and `SetOrphanedAsync` change them.
+  So an editor that was open while the note was relinked can't put the old folder back. Import
+  (T1.7) is the one exception: it's an explicit restore, so a matched note takes the imported
+  binding (§ Export format; matching by `id` can move it).
 - Labels on an upserted note are matched to existing labels by name, ignoring case (the existing
   label's color wins). Unknown names create the label (inline create, REQ-011).
 - A second live note for the same `path_norm` or `(volume_serial, file_id)` gives

@@ -64,21 +64,65 @@ public sealed class StoreFixture : IAsyncDisposable
         Note.CreateFor(Folder(path, fileId), Clock) with { Title = title };
 }
 
-/// <summary>In-memory identity: tests decide where each file ID "is".</summary>
+/// <summary>
+/// In-memory identity: tests decide where each file ID "is" (<see cref="Place"/>) and which folder
+/// sits at a path (<see cref="PutFolder"/>), including folders on other volumes (ADR-020).
+/// </summary>
 public sealed class FakeIdentity : IFolderIdentityService
 {
     private readonly Dictionary<string, LocateResult> _locations = [];
+    private readonly Dictionary<string, FolderRef> _folders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _dirs = new(StringComparer.OrdinalIgnoreCase);
 
     public void Place(string fileId, LocateStatus status, string? path) => _locations[fileId] = new LocateResult(status, path);
 
-    public FolderRef Resolve(string path) => StoreFixture.Folder(path);
+    /// <summary>A folder exists at <paramref name="folder"/>'s path (and its drive root exists).</summary>
+    public void PutFolder(FolderRef folder)
+    {
+        _folders[folder.PathDisplay] = folder;
+        _dirs.Add(folder.PathDisplay);
+        if (Path.GetPathRoot(folder.PathDisplay) is { Length: > 0 } root)
+        {
+            _dirs.Add(Trim(root));
+        }
+    }
+
+    public void RemoveFolder(string path)
+    {
+        _folders.Remove(Trim(path));
+        _dirs.Remove(Trim(path));
+    }
+
+    /// <summary>Only the drive root exists (the drive is "mounted").</summary>
+    public void PutRoot(string root) => _dirs.Add(Trim(root));
+
+    /// <summary>Directory-exists for <see cref="OrphanScanner"/> and <see cref="RelinkTarget"/>.</summary>
+    public bool Exists(string path) => _dirs.Contains(Trim(path));
+
+    public FolderRef Resolve(string path) => TryResolve(path, out var f) ? f : throw new ArgumentException(path, nameof(path));
 
     public bool TryResolve(string path, [NotNullWhen(true)] out FolderRef? folder)
     {
-        folder = PathNormalizer.TryNormalize(path, out _) ? StoreFixture.Folder(path) : null;
-        return folder is not null;
+        if (!PathNormalizer.TryNormalize(path, out _))
+        {
+            folder = null;
+            return false;
+        }
+
+        folder = _folders.TryGetValue(PathNormalizer.NormalizeDisplay(path), out var placed) ? placed : StoreFixture.Folder(path);
+        return true;
     }
 
-    public LocateResult Locate(FolderRef storedRef) =>
-        storedRef.FileId is { } id && _locations.TryGetValue(id, out var r) ? r : LocateResult.NotFound;
+    public LocateResult Locate(FolderRef storedRef)
+    {
+        ArgumentNullException.ThrowIfNull(storedRef);
+        if (storedRef.FileId is { } id && _locations.TryGetValue(id, out var r))
+        {
+            return r;
+        }
+
+        return !storedRef.HasFileId && Exists(storedRef.PathDisplay) ? new LocateResult(LocateStatus.Found, storedRef.PathDisplay) : LocateResult.NotFound;
+    }
+
+    private static string Trim(string p) => p.TrimEnd('\\');
 }

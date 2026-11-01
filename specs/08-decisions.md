@@ -90,7 +90,7 @@ from PID-filtered WinEvent hooks. XAML Islands / a Win32 host isn't needed.
 **Consequences:** One UI stack for the whole app. The app has to manage re-owning and detaching
 on destroy itself.
 
-## ADR-009: Folder lookup is ID-first, with "recreated at the same path" re-binding — *accepted (S4, 2026-10-31)*
+## ADR-009: Folder lookup is ID-first, with "recreated at the same path" re-binding — *accepted (S4, 2026-10-31); amended by ADR-020 (same volume only)*
 
 **Context:** S4 showed that delete + recreate gives a new file ID, which would detach notes from
 rebuilt folders like `bin\`. A path-first lookup, on the other hand, would wrongly attach a note
@@ -277,3 +277,51 @@ activated, because focus set before that is lost.
 don't. The hotkey works while the app runs, including tray-only. If another app owns the hotkey,
 registration fails and only the tray can open the palette until Settings (T2.8) lets the user
 pick another one. The palette's window adds to the "windows used" memory (REQ-080).
+
+## ADR-020: Orphan handling never guesses: same volume only, conditional writes, conflicts orphan — *accepted (T2.7, 2026-11-01); amends ADR-009*
+
+**Context:** T2.7 makes orphan detection and relinking user-facing. The user asked for data
+integrity first: an occasional orphaned note is acceptable, a note attached to the wrong folder or
+a lost note is not. Reviewing the T1.5 code against that found four ways to get it wrong:
+(1) ADR-009's "recreated at the same path" rule didn't check the volume, so a *different* drive
+mounted at the same letter with the same folder path took the note and overwrote its file ID;
+(2) `UpsertAsync` wrote the folder binding and `orphaned_at` from the caller's copy, so an editor
+open during a relink put the old folder back on its next autosave; (3) a scan decision was based
+on a read and applied later, so it could overwrite a relink made in between; (4) a re-bind blocked
+by another note left the note silently pointing at a stale path, neither attached nor orphaned.
+**Decision:**
+- Automatic re-attachment only to the same folder (file ID) or to a folder recreated at the same
+  path **on the same volume serial**. `Locate` now tells `VolumeNotMounted` apart from `NotFound`,
+  so an unplugged drive shows as "drive not connected" and recovers when it's back.
+- `RelinkAsync` and `SetOrphanedAsync` take the binding the caller saw (`expectedFolder`) and
+  refuse (`NoteBindingChangedException`) if it changed; the scan, the lookup's re-bind and the
+  Orphaned page all pass it.
+- Upsert keeps an existing note's binding and orphan state; only relink/orphan operations change
+  them. Import (an explicit restore, T1.7) keeps its documented behaviour of taking the imported
+  binding.
+- A re-bind that conflicts with another live note changes neither note; the moving note is
+  orphaned with the reason. Nothing is merged or taken over automatically.
+- User relinks are explicit (folder picker), refuse folders that have a note, files and Recycle
+  Bin folders, ask when the folder name differs, and offer Undo for 10 s. Nothing in this flow
+  changes the note's content, labels, dates or `updated_at`.
+**Consequences:** Some situations that could have been auto-repaired now need one *Relink…*: a
+drive restored from a backup or reformatted (new serial), a cross-volume move, or two notes
+fighting over one folder. The scan reads full notes (`ListAsync`) to classify them; fine at the
+current scale, and a light binding-only query is the fix if T5.5's 10k-note measurement shows a
+cost. Undo of a relink sets `orphaned_at` to the undo time rather than restoring the old timestamp.
+
+## ADR-021: Main-window pages are created in code on first visit, not with `x:Load` — *accepted (T2.7, 2026-11-01)*
+
+**Context:** T2.6 deferred the Labels and Settings pages with `x:Load="False"` and realized them
+with `FindName` to save memory (REQ-080). In T2.7's live check, opening any deferred page crashed
+the app: `FindName` returned null, at HEAD too, so the bug shipped in T2.6 (its live check never
+opened those pages). The reason: the XAML compiler realizes deferred elements through the owner's
+`FindName`, and a WinUI 3 `Window` isn't a `FrameworkElement` (binding `x:Load` with `x:Bind`
+doesn't compile there for the same reason). So `x:Load` can't work for elements declared directly
+in a `Window`.
+**Decision:** `MainWindow.xaml` has an empty `PageHost` grid; `EnsurePage` creates the Labels,
+Orphaned and Settings pages (`UserControl`s; the Settings stub became `SettingsStubPage`) and adds
+them to it on first visit. Pages stay alive while the window does, as before.
+**Consequences:** Same memory profile as T2.6 intended (a page costs nothing until opened). Future
+pages follow this pattern; `x:Load` stays usable inside `UserControl`s and data templates
+(the Labels page's rename box uses it). The live check of every task that adds a page opens it.

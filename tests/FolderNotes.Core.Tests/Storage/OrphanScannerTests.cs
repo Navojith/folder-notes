@@ -77,12 +77,134 @@ public sealed class OrphanScannerTests : IAsyncLifetime
     public async Task REQ061_Scan_OrphanThatReappears_IsRecovered()
     {
         var n = await NoteFor("Comes back");
-        await _f.Store.SetOrphanedAsync(n.Id, true, Ct);
+        await _f.Store.SetOrphanedAsync(n.Id, true, null, Ct);
 
         var report = await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
 
         report.Recovered.ShouldBe(1);
         (await _f.Store.GetByIdAsync(n.Id, Ct))!.IsOrphaned.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task REQ061_DuplicateFolderNames_ADeletedFolder_NeverAttachesToItsNamesake()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "2025"));
+        Directory.CreateDirectory(Path.Combine(_root, "2026"));
+        var old = await NoteFor(@"2025\Acme");
+        var current = await NoteFor(@"2026\Acme");
+        Directory.Delete(Path.Combine(_root, "2025", "Acme"));
+
+        var report = await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
+
+        report.ShouldBe(new OrphanScanReport(Checked: 2, Relinked: 0, Orphaned: 1, Recovered: 0));
+        var oldNow = await _f.Store.GetByIdAsync(old.Id, Ct);
+        oldNow!.IsOrphaned.ShouldBeTrue();
+        oldNow.Folder.ShouldBe(old.Folder);
+        (await _f.Store.GetByIdAsync(current.Id, Ct)).ShouldBeEquivalentTo(current);
+        (await _f.Store.GetByFolderAsync(_identity.Resolve(Path.Combine(_root, "2026", "Acme")), Ct))!.Id.ShouldBe(current.Id);
+    }
+
+    [Fact]
+    public async Task REQ061_DeletedFolder_ANewSameNamedFolderElsewhere_DoesNotTakeTheNote()
+    {
+        var n = await NoteFor("Acme");
+        Directory.Delete(Path.Combine(_root, "Acme"));
+        var elsewhere = Directory.CreateDirectory(Path.Combine(_root, "Archive", "Acme")).FullName;
+
+        await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
+
+        (await _f.Store.GetByIdAsync(n.Id, Ct))!.IsOrphaned.ShouldBeTrue();
+        (await _f.Store.GetByFolderAsync(_identity.Resolve(elsewhere), Ct)).ShouldBeNull();
+        (await new OrphanScanner(_f.Store, _identity).CheckAsync((await _f.Store.GetByIdAsync(n.Id, Ct))!, Ct)).Check.State
+            .ShouldBe(FolderState.Missing);
+    }
+
+    [Fact]
+    public async Task REQ060_MovedFolder_AndANewSameNamedFolderAtTheOldPath_NoteFollowsTheMovedOne()
+    {
+        var n = await NoteFor("Acme");
+        Directory.CreateDirectory(Path.Combine(_root, "Archive"));
+        Directory.Move(Path.Combine(_root, "Acme"), Path.Combine(_root, "Archive", "Acme"));
+        var newcomer = Directory.CreateDirectory(Path.Combine(_root, "Acme")).FullName;
+
+        var report = await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
+
+        report.Relinked.ShouldBe(1);
+        var now = await _f.Store.GetByIdAsync(n.Id, Ct);
+        now!.Folder.PathDisplay.ShouldEndWith(@"\Archive\Acme");
+        now.Folder.FileId.ShouldBe(n.Folder.FileId);
+        (await _f.Store.GetByFolderAsync(_identity.Resolve(newcomer), Ct)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task REQ060_RenameAndMove_KeepEveryFieldOfTheNote()
+    {
+        var dir = Directory.CreateDirectory(Path.Combine(_root, "Client X")).FullName;
+        var n = await _f.Store.UpsertAsync(Note.CreateFor(_identity.Resolve(dir), _f.Clock) with
+        {
+            Title = "Client X",
+            BodyMd = "Retention: 7 years.",
+            Labels = [Label.Create("client", "blue")],
+            Status = NoteStatus.Keep,
+            KeepUntil = new DateOnly(2030, 1, 1),
+        }, Ct);
+        _f.Clock.Advance(TimeSpan.FromDays(2));
+        Directory.CreateDirectory(Path.Combine(_root, "Done"));
+        Directory.Move(dir, Path.Combine(_root, "Done", "Client X (closed)"));
+
+        await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
+
+        var now = await _f.Store.GetByIdAsync(n.Id, Ct);
+        now!.Folder.PathDisplay.ShouldEndWith(@"\Done\Client X (closed)");
+        now.ShouldBeEquivalentTo(n with { Folder = now.Folder });
+    }
+
+    [Fact]
+    public async Task REQ060_CaseOnlyRename_UpdatesTheDisplayPath()
+    {
+        var n = await NoteFor("acme");
+        var path = Path.Combine(_root, "acme");
+        Directory.Move(path, path + "-tmp");
+        Directory.Move(path + "-tmp", Path.Combine(_root, "ACME"));
+
+        var result = await new OrphanScanner(_f.Store, _identity).CheckAsync(n, Ct);
+
+        result.Check.State.ShouldBe(FolderState.Present);
+        (await _f.Store.GetByIdAsync(n.Id, Ct))!.Folder.PathDisplay.ShouldEndWith(@"\ACME");
+    }
+
+    [Fact]
+    public async Task REQ061_RelinkTarget_OnRealFolders()
+    {
+        var n = await NoteFor("Acme");
+        var file = Path.Combine(_root, "notes.txt");
+        await File.WriteAllTextAsync(file, "x", Ct);
+        var other = Directory.CreateDirectory(Path.Combine(_root, "Other")).FullName;
+
+        RelinkTarget.Check(_identity, n, file).Problem.ShouldBe(RelinkProblem.NotAFolder);
+        RelinkTarget.Check(_identity, n, Path.Combine(_root, "Missing")).Problem.ShouldBe(RelinkProblem.NotAFolder);
+        var ok = RelinkTarget.Check(_identity, n, other);
+        ok.Problem.ShouldBe(RelinkProblem.None);
+        ok.NameDiffers.ShouldBeTrue();
+        ok.Target!.FileId.ShouldBe(_identity.Resolve(other).FileId);
+        RelinkTarget.Check(_identity, n, Path.Combine(_root, "Acme")).SameFolder.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task REQ061_UserRelink_OfADeletedFoldersNote_ToTheRightFolder()
+    {
+        var n = await NoteFor("Acme");
+        Directory.Delete(Path.Combine(_root, "Acme"));
+        await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct);
+        var orphan = (await _f.Store.GetByIdAsync(n.Id, Ct))!;
+        var restoredCopy = Directory.CreateDirectory(Path.Combine(_root, "Restored", "Acme")).FullName;
+
+        var target = RelinkTarget.Check(_identity, orphan, restoredCopy).Target!;
+        var relinked = await _f.Store.RelinkAsync(n.Id, target, orphan.Folder, Ct);
+
+        relinked.IsOrphaned.ShouldBeFalse();
+        (await _f.Store.GetByFolderAsync(_identity.Resolve(restoredCopy), Ct))!.Id.ShouldBe(n.Id);
+        (await new OrphanScanner(_f.Store, _identity).ScanAsync(Ct)).ShouldBe(new OrphanScanReport(1, 0, 0, 0));
     }
 
     [Fact]

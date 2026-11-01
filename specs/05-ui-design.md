@@ -228,10 +228,70 @@ Labels  6 labels
 - **UIA:** rows are named "Label <name>, used by N notes"; the buttons are named "Rename <name>",
   "Colour of <name>", "Delete <name>", "Show notes with <name>".
 
+#### Orphaned page (T2.7)
+
+The **Orphaned** item sits under *Labels* in the navigation rail. When there are orphaned notes it
+carries a numeric `InfoBadge` with their count (also in its UIA name: "Orphaned, 2 notes").
+
+```
+Orphaned  2 notes                                              [⟳ Check again]
+These notes' folders can't be found. Nothing has been deleted: relink a note to its
+folder, or delete the note.
+┌──────────────────────────────────────────────────────────────────────────────┐
+│▌Client: Acme Ltd                                   🔒 [client]               │
+│  D:\Clients\Acme Ltd                                                          │
+│  ⚠ The folder was deleted, or moved to another drive. · Orphaned 3 Nov 2026   │
+│                                         [Relink…]  [Open note]  [🗑 Delete]   │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **What's listed.** Live notes with `orphaned_at` set (`NoteListState.Orphaned`), sorted by path
+  (hierarchical). Each row: accent bar, title, status pill and up to 3 label chips, the full stored
+  path (selectable), the reason and "Orphaned <d MMM yyyy>".
+- **Opening the page checks the listed notes again** (03 § Orphan detection, the same rules as the
+  background scan): a note whose folder is back, or that can now follow its folder, is re-attached
+  and leaves the list. *Check again* runs the full scan over every note and then says what it did
+  in an InfoBar: "Checked 12 notes. 1 reattached, 1 newly orphaned." or "Checked 12 notes. Nothing
+  changed."
+- **Reason** (from the classification):
+  - not found: "The folder was deleted, or moved to another drive."
+  - in the Recycle Bin: "The folder is in the Recycle Bin. Restore it and the note reattaches."
+  - drive unavailable: "The drive or network location isn't available. Reconnect it and the note
+    reattaches."
+  - conflict: "The folder is now at <path>, but another note is attached there."
+  - found again (the folder is back but the note is still flagged, e.g. a write was skipped): "The
+    folder was found again. Check again to reattach the note."
+- **Relink…** opens the system folder picker (commit button "Relink"), starting at the nearest
+  existing parent of the stored path. Cancel does nothing. Then:
+  - not a usable folder (a file, an invalid path) → "That isn't a folder." under the row;
+  - in the Recycle Bin → "That folder is in the Recycle Bin. Restore it first.";
+  - the folder's name differs from the stored folder name (ignoring case) → a ContentDialog
+    "Relink to a different folder?" with "'<title>' was for '<old name>'. You picked '<new name>'
+    (<new path>)." · Relink / Cancel;
+  - the folder already has a note → "<path> already has a note ('<other title>'). Delete or relink
+    that note first." under the row;
+  - the note changed meanwhile (relinked elsewhere, deleted) → "This note changed in the
+    meantime." and the list reloads;
+  - any other failure → "Couldn't relink: <message>". In every error case nothing is changed.
+  - On success the row leaves the list and a bar says "Relinked '<title>' to <path>." with
+    **Undo** for 10 s. Undo puts the old binding back and orphans the note again; if that fails
+    (say, the old path got a new note meanwhile) the bar says "Couldn't undo: <message>".
+- **Open note** opens the note in *All notes* (`--open-note` behaviour) so it can be read first.
+- **Delete** soft-deletes (REQ-006) with the same bar and **Undo** for 10 s ("Deleted '<title>'.");
+  the note is purged 30 days later like any deleted note.
+- **Empty state:** a check-mark glyph, "No orphaned notes", "Every note's folder was found."
+- **Keeping in sync.** The page and the badge reload (coalesced) on any note change.
+- **UIA:** rows are named "<title>, <path>, <reason>"; the buttons "Relink <title>", "Open note
+  <title>", "Delete <title>"; the bar is a polite live region.
+
+Open editors (compact windows and the library's detail pane) follow a relink or orphan change of
+their note: the header path and *Open folder* update without counting as an edit (ADR-020).
+
 #### Library behaviour (T2.4)
 
 `MainWindow` hosts a `NavigationView` (left, `PaneDisplayMode=Auto`). Pages other than All notes
-are created the first time they're opened (`x:Load`, since T2.6). Items appear when their task
+are created in code the first time they're opened (since T2.7, ADR-021; T2.6's `x:Load` never
+realized them, so opening Labels or Settings crashed). Items appear when their task
 lands: **All notes** (T2.4), **Labels** (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
 footer **Settings** (T2.8). Until T2.8 the Settings page holds only the Theme choice that the
 T2.2 token sample had (System / Light / Dark, not saved across restarts). The token sample is gone.

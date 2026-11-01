@@ -196,7 +196,41 @@ superseded), and specs 03/04 reflect what was learned.
   stayed behind the foreground app and lost the caret (ADR-019 addendum). REQ-051 in Release at
   10k notes: p95 8.7–38.3 ms over 10 query shapes. Memory: the palette costs ≈10 MB once, putting
   "windows used" at 91–93 MB; the user raised that budget to 100 MB (ADR-016 amendment). `perf-check` (with the new palette stage) passes against 100 MB: tray-only 33.1 MB; editor ≤ 69.8 MB; main window ≤ 83.3 MB; palette ≤ 94.2 MB open / 93.3 MB closed (private bytes ≈ 115 MB); growth 0.2 / -2.4 / 3.3 MB; idle CPU 0 %.*
-- [ ] **T2.7 🧱 Orphaned view + relink** (REQ-061).
+- [x] **T2.7 🧱 Orphaned view + relink** (REQ-060, 061). See 03 § Orphan detection and § Relink
+  rules, 05 § Orphaned page, 02 § Orphaned page and orphan scan, ADR-020.
+  *Done when:* Core tests on real temp folders and with a fake identity cover: missing (deleted)
+  folders, moved and renamed folders, folders recreated at the same path, the Recycle Bin, an
+  unmounted volume, a different volume at the same path, duplicate folder names (a same-named
+  folder elsewhere never takes a note), conflicts with another note (neither note changes),
+  concurrent binding changes (skipped), relink refusals (duplicate, deleted note, file, Recycle
+  Bin, changed binding) leaving the note unchanged, an autosave after a relink keeping the new
+  folder, and note content identical after relink and undo; view-model tests cover the list and
+  reasons, the per-row check on activation, Check again, the relink flow (cancel, refusals,
+  different-name confirm, success, Undo, failed Undo), delete with Undo, the badge count, and open
+  editors following a relink; checked live on Release (delete, move and Recycle Bin a noted folder;
+  the page shows the reasons; relink through the real picker; Undo; restore from the Recycle Bin
+  reattaches) and `eng/perf-check.ps1` passes.
+  *Done 2026-11-01: Core: `OrphanScanner` rewritten as `Classify` (file system only) + `CheckAsync`
+  (conditional writes) with `FolderState` / `OrphanOutcome`; `RelinkTarget`; `LocateStatus.VolumeNotMounted`;
+  `RelinkAsync` / `SetOrphanedAsync` take `expectedFolder` (`NoteBindingChangedException`); Upsert keeps
+  an existing note's binding and orphan state (import excepted); the lookup's re-bind needs the same
+  volume serial and is conditional (ADR-020). App: `OrphansViewModel` / `OrphanItem`, `OrphansPage`
+  (reasons, Check again, Relink… with the WinAppSDK folder picker, different-name ContentDialog,
+  Undo bar, Delete with Undo, Open note), the Orphaned nav item with a count badge,
+  `OrphanScanService` (10 s after start, every 6 h, on demand, single-flight), and
+  `NoteEditorViewModel.RefreshFolderAsync` wired to the library's detail editor and the compact
+  editors. 53 new tests (26 Core, 27 App); 683/683 green in Release. Checked live on Release
+  against seeded notes under `C:\Temp\FolderNotesE2E\T27`: the startup scan (5 notes, 21 ms) followed a
+  moved folder and orphaned a deleted one, one in the Recycle Bin and an old dev note; the page
+  showed the right reasons and badge; relink through the real picker (commit button "Relink"),
+  Undo within 10 s, the different-name question (Cancel, then Relink), a refused relink onto a
+  folder with a note, Delete + Undo, restore from the Recycle Bin + Check again ("1 reattached"),
+  and the library's detail editor following a relink. Every note kept its body, labels, status
+  and `updated_at`. **Found live and fixed:** opening Labels or Settings crashed the app since
+  T2.6 (`x:Load` can't realize elements declared in a Window; ADR-021); pages are now created in
+  code. `perf-check` passes: tray-only 34 MB; editor ≤ 68.4 MB; main window ≤ 77 MB; palette
+  ≤ 78.8 MB; growth -2.5 / -1.6 / +0.5 MB; idle CPU 0 / 0.052 %. The Orphaned page adds ≈2.7 MB once
+  visited (70.5 → 73.2 MB; 77.4 MB with Labels visited too).*
 - [ ] **T2.8 🧱 Settings page** (REQ-081) and start with Windows (Run key, or a StartupTask when packaged).
 - [ ] **T2.9 ✅ Accessibility pass** (REQ-083) with Accessibility Insights. No critical issues.
 

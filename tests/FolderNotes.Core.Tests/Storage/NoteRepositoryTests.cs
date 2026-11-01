@@ -260,7 +260,7 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
         await Store.UpsertAsync(_f.NewNote(@"C:\B") with { Labels = [Label.Create("client", "blue")] }, Ct);
         var gone = await Store.UpsertAsync(_f.NewNote(@"C:\C") with { Labels = [Label.Create("client", "blue")] }, Ct);
         await Store.DeleteAsync(gone.Id, Ct);
-        await Store.SetOrphanedAsync(a.Id, true, Ct);
+        await Store.SetOrphanedAsync(a.Id, true, null, Ct);
 
         var labels = await Store.ListLabelsAsync(Ct);
         var counts = await Store.CountNotesByLabelAsync(Ct);
@@ -342,13 +342,13 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
     {
         var a = await Store.UpsertAsync(_f.NewNote(@"C:\A"), Ct);
         await Store.UpsertAsync(_f.NewNote(@"C:\B"), Ct);
-        await Store.SetOrphanedAsync(a.Id, true, Ct);
+        await Store.SetOrphanedAsync(a.Id, true, null, Ct);
 
         (await Store.ListAsync(new NoteQuery { State = NoteListState.Orphaned }, Ct)).Single().Id.ShouldBe(a.Id);
         (await Store.ListAsync(NoteQuery.All, Ct)).Count.ShouldBe(2);
         (await Store.GetByIdAsync(a.Id, Ct))!.OrphanedAt.ShouldBe(_f.Clock.GetUtcNow());
 
-        await Store.SetOrphanedAsync(a.Id, false, Ct);
+        await Store.SetOrphanedAsync(a.Id, false, null, Ct);
         (await Store.ListAsync(new NoteQuery { State = NoteListState.Orphaned }, Ct)).ShouldBeEmpty();
     }
 
@@ -356,9 +356,9 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
     public async Task REQ061_Relink_MovesNoteToNewFolder_AndClearsOrphan()
     {
         var a = await Store.UpsertAsync(_f.NewNote(@"C:\Old", fileId: "000000000000000000000000000000AA"), Ct);
-        await Store.SetOrphanedAsync(a.Id, true, Ct);
+        await Store.SetOrphanedAsync(a.Id, true, null, Ct);
 
-        var relinked = await Store.RelinkAsync(a.Id, StoreFixture.Folder(@"E:\New", "000000000000000000000000000000BB"), Ct);
+        var relinked = await Store.RelinkAsync(a.Id, StoreFixture.Folder(@"E:\New", "000000000000000000000000000000BB"), null, Ct);
 
         relinked.Folder.PathDisplay.ShouldBe(@"E:\New");
         relinked.Folder.FileId.ShouldBe("000000000000000000000000000000BB");
@@ -371,7 +371,7 @@ public sealed class NoteRepositoryTests : IAsyncLifetime
     {
         var a = await Store.UpsertAsync(_f.NewNote(@"C:\A"), Ct);
         await Store.UpsertAsync(_f.NewNote(@"C:\B"), Ct);
-        await Should.ThrowAsync<DuplicateFolderNoteException>(() => Store.RelinkAsync(a.Id, StoreFixture.Folder(@"C:\B"), Ct));
+        await Should.ThrowAsync<DuplicateFolderNoteException>(() => Store.RelinkAsync(a.Id, StoreFixture.Folder(@"C:\B"), null, Ct));
     }
 
     // ── ADR-009 lookup ──

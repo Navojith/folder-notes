@@ -222,6 +222,31 @@ Resolved in T2.1:
 - **`SearchPaletteWindow`** hosts the view; `AppShell.OpenSearch(query)` creates it once and
   re-shows it. *Open note* goes through `AppShell.OpenNote`.
 
+## Orphaned page and orphan scan (T2.7)
+
+- **`OrphanScanner`** (Core, 03 § Orphan detection): `Classify(note)` → `FolderCheck(State,
+  Current, Path)` reads the file system only; `CheckAsync(note)` applies one result with
+  conditional writes and returns an `OrphanCheckResult` (outcome: `Unchanged`, `Recovered`,
+  `Relinked`, `Orphaned`, `Conflict` with the other note's id, `Skipped`); `ScanAsync()` runs it over
+  every live note and returns an `OrphanScanReport`. It takes `INoteRepository` and
+  `IFolderIdentityService` (plus a directory-exists function for tests).
+- **`RelinkTarget.Check(identity, note, pickedPath)`** (Core): validates a picked folder (03 §
+  Relink rules) and returns the target `FolderRef` or the problem, plus whether the name differs.
+- **`OrphanScanService`** (App): runs `ScanAsync` on the thread pool 10 s after startup, then every
+  6 h (`TimeProvider` timer), and on demand (`ScanNowAsync`). One scan at a time: a request while
+  one runs joins it. Results are logged; failures are logged and the next run retries.
+- **`OrphansViewModel`** (no XAML types): the list (`OrphanItem`), count (for the nav badge),
+  per-row check on activation, relink with confirm and Undo, delete with Undo, open note.
+  Dependencies: `INoteRepository`, `OrphanScanner`, `OrphanScanService`,
+  `IFolderIdentityService`, `IFolderPicker` (the WinAppSDK `Microsoft.Windows.Storage.Pickers.FolderPicker`,
+  owned by the main window), a confirm function (the page's ContentDialog), `INoteEvents`,
+  `IUiDispatcher`, `TimeProvider`, `ILogger`. Created with the main window (for the badge); the page
+  itself is created on first visit (ADR-021).
+- **Open editors follow relinks (ADR-020):** `NoteEditorViewModel.RefreshFolderAsync()` re-reads
+  the note's binding (header path, *Open folder*) without marking it dirty. `LibraryViewModel`
+  calls it for its detail editor and `AppShell` for every compact editor, on `NoteChanged` with
+  `Relinked` or `OrphanStateChanged` for that note.
+
 ## Markdown (REQ-007)
 
 `MarkdownModel.Parse(string)` (Markdig 1.4, task lists + auto-links, HTML not rendered) turns the
@@ -242,8 +267,10 @@ public interface INoteRepository {
     Task RestoreAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<Note>> ListAsync(NoteQuery query, CancellationToken ct = default);
     Task<int> PurgeDeletedAsync(TimeSpan olderThan, CancellationToken ct = default);
-    Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default); // REQ-061
-    Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default);
+    // REQ-061. expectedFolder: the binding the caller saw; a different stored binding throws
+    // NoteBindingChangedException and changes nothing (03 § Relink rules, ADR-020). Null = unconditional.
+    Task<Note> RelinkAsync(Guid id, FolderRef newFolder, FolderRef? expectedFolder, CancellationToken ct = default);
+    Task<bool> SetOrphanedAsync(Guid id, bool orphaned, FolderRef? expectedFolder, CancellationToken ct = default); // false = already so
     event EventHandler<NoteChangedEventArgs> NoteChanged;  // raised after commit, on the writer thread
 }
 // GetByFolderAsync runs the ADR-009 lookup (03 § Lookup algorithm) and does the re-binding itself.
@@ -271,7 +298,9 @@ public interface IFolderIdentityService {
     LocateResult Locate(FolderRef storedRef);       // find the current path for a stored ref
 }
 // LocateResult(Status, Path): Found (path, maybe moved) · InRecycleBin (path under $Recycle.Bin)
-// · NotFound. A ref without a file ID (network/removable, REQ-062) is "Found" only if its path exists.
+// · NotFound (the volume is mounted, the ID is gone) · VolumeNotMounted (no mounted volume has the
+// stored serial, T2.7). A ref without a file ID (network/removable, REQ-062) is "Found" only if its
+// path exists.
 
 public interface IExplorerTracker {                 // App layer
     event EventHandler<ActiveFolderChangedEventArgs> ActiveFolderChanged; // HWND, path or null

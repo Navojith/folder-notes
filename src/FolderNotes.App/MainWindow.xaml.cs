@@ -23,12 +23,13 @@ public sealed partial class MainWindow : Window, IThemeTarget
     private AppTheme _appTheme;
     private bool _closingForGood;
 
-    internal MainWindow(ThemeService theme, LibraryViewModel? library, Labels.LabelsViewModel? labels, ILogger log)
+    internal MainWindow(ThemeService theme, LibraryViewModel? library, Labels.LabelsViewModel? labels, Orphans.OrphansViewModel? orphans, ILogger log)
     {
         _theme = theme ?? throw new ArgumentNullException(nameof(theme));
         _log = (log ?? throw new ArgumentNullException(nameof(log))).ForContext<MainWindow>();
         LibraryViewModel = library;
         LabelsViewModel = labels;
+        OrphansViewModel = orphans;
         InitializeComponent();
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "FolderNotes.ico"));
         AppWindow.Resize(Scale(LogicalWidth, LogicalHeight));
@@ -36,6 +37,13 @@ public sealed partial class MainWindow : Window, IThemeTarget
         Library.Visibility = library is null ? Visibility.Collapsed : Visibility.Visible;
         Nav.SelectedItem = AllNotesItem;
         AppWindow.Closing += OnClosing;
+        if (orphans is not null)
+        {
+            orphans.Picker = new Services.WindowFolderPicker(() => AppWindow.Id);
+            orphans.PropertyChanged += OnOrphansChanged;
+        }
+
+        OrphansItem.Visibility = orphans is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>The user closed the window; it's hidden now.</summary>
@@ -44,6 +52,18 @@ public sealed partial class MainWindow : Window, IThemeTarget
     internal LibraryViewModel? LibraryViewModel { get; }
 
     internal Labels.LabelsViewModel? LabelsViewModel { get; }
+
+    internal Orphans.OrphansViewModel? OrphansViewModel { get; }
+
+    // The navigation badge (05, Orphaned page): the count, also in the item's UIA name.
+    private void OnOrphansChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(Orphans.OrphansViewModel.Count) && OrphansViewModel is { } orphans)
+        {
+            OrphansItem.InfoBadge = orphans.Count > 0 ? new InfoBadge { Value = orphans.Count } : null;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(OrphansItem, orphans.NavName);
+        }
+    }
 
     internal bool IsShown => AppWindow.IsVisible;
 
@@ -62,30 +82,54 @@ public sealed partial class MainWindow : Window, IThemeTarget
 
     private void SyncThemeChoice()
     {
-        if (ThemeChoice is null)
+        if (SettingsPage?.ThemeChoice is not { } choice)
         {
-            return; // the Settings page isn't created until it's first opened (x:Load)
+            return; // the Settings page isn't created until it's first opened (EnsurePage)
         }
 
         _syncingChoice = true;
-        ThemeChoice.SelectedIndex = (int)_appTheme;
+        choice.SelectedIndex = (int)_appTheme;
         _syncingChoice = false;
     }
 
-    /// <summary>Pages other than All notes are created on first visit (x:Load), to keep memory down (REQ-080).</summary>
+    // Created on first visit (EnsurePage).
+    private Labels.LabelsPage? LabelsPage { get; set; }
+
+    private Orphans.OrphansPage? OrphansPage { get; set; }
+
+    private SettingsStubPage? SettingsPage { get; set; }
+
+    /// <summary>
+    /// Pages other than All notes are created on first visit, to keep memory down (REQ-080). They're
+    /// built in code: x:Load can't realize elements declared directly in a Window (FindName returned
+    /// null, which crashed the Labels and Settings pages since T2.6; found live in T2.7).
+    /// </summary>
     private void EnsurePage(object page)
     {
         if (ReferenceEquals(page, LabelsItem) && LabelsPage is null && LabelsViewModel is not null)
         {
-            _ = Root.FindName(nameof(LabelsPage));
-            LabelsPage!.ViewModel = LabelsViewModel;
+            LabelsPage = AddPage(new Labels.LabelsPage());
+            LabelsPage.ViewModel = LabelsViewModel;
             LabelsPage.ShowNotesRequested += OnShowNotesRequested;
+        }
+        else if (ReferenceEquals(page, OrphansItem) && OrphansPage is null && OrphansViewModel is not null)
+        {
+            OrphansPage = AddPage(new Orphans.OrphansPage());
+            OrphansPage.ViewModel = OrphansViewModel;
         }
         else if (ReferenceEquals(page, SettingsItem) && SettingsPage is null)
         {
-            _ = Root.FindName(nameof(SettingsPage));
+            SettingsPage = AddPage(new SettingsStubPage());
+            SettingsPage.ThemeChoice.SelectionChanged += OnThemeChoiceChanged;
             SyncThemeChoice();
         }
+    }
+
+    private T AddPage<T>(T page)
+        where T : FrameworkElement
+    {
+        PageHost.Children.Add(page);
+        return page;
     }
 
     /// <summary>Shows (or re-shows) the window and refreshes the library (05: relative times, first load).</summary>
@@ -97,9 +141,28 @@ public sealed partial class MainWindow : Window, IThemeTarget
         }
 
         Activate();
+        if (OrphansViewModel is { } orphans)
+        {
+            _ = RefreshOrphansAsync(orphans); // the badge; doesn't hold up the library
+        }
+
         if (LibraryViewModel is { } library)
         {
             await library.ActivateAsync();
+        }
+    }
+
+    private async Task RefreshOrphansAsync(Orphans.OrphansViewModel orphans)
+    {
+        try
+        {
+            await orphans.ReloadAsync();
+        }
+#pragma warning disable CA1031 // The badge is a hint; the page shows errors when opened.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Counting the orphaned notes failed");
         }
     }
 
@@ -170,6 +233,27 @@ public sealed partial class MainWindow : Window, IThemeTarget
         {
             LabelsPage.Visibility = ReferenceEquals(page, LabelsItem) && LabelsViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        if (OrphansPage is not null)
+        {
+            OrphansPage.Visibility = ReferenceEquals(page, OrphansItem) && OrphansViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ReferenceEquals(page, OrphansItem) && OrphansViewModel is { } orphans)
+        {
+            try
+            {
+                await orphans.ActivateAsync(); // checks the listed notes again (05)
+            }
+#pragma warning disable CA1031 // Shown in the window rather than crashing the tray.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                _log.Error(ex, "Loading the Orphaned page failed");
+                ShowError($"Couldn't load the orphaned notes: {ex.Message}");
+            }
+        }
+
         if (ReferenceEquals(page, LabelsItem) && LabelsViewModel is { } labels)
         {
             try
@@ -210,9 +294,9 @@ public sealed partial class MainWindow : Window, IThemeTarget
 
     private void OnThemeChoiceChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_syncingChoice && ThemeChoice.SelectedIndex >= 0)
+        if (!_syncingChoice && sender is RadioButtons { SelectedIndex: >= 0 } choice)
         {
-            _theme.Theme = (AppTheme)ThemeChoice.SelectedIndex;
+            _theme.Theme = (AppTheme)choice.SelectedIndex;
         }
     }
 

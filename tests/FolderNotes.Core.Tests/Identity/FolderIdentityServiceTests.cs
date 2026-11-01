@@ -99,6 +99,17 @@ public sealed class FolderIdentityServiceTests : IDisposable
     }
 
     [Fact]
+    public void REQ061_VolumeNotMounted_IsToldApartFromDeleted()
+    {
+        var real = _sut.Resolve(Make("Somewhere"));
+        // A serial that no mounted volume has (an unplugged drive), same path.
+        var unplugged = real with { VolumeSerial = "0123456789ABCDEF" };
+
+        _sut.Locate(unplugged).ShouldBe(LocateResult.VolumeNotMounted);
+        _sut.Locate(real with { FileId = "00000000000000007FFFFFFFFFFFFFF1" }).Status.ShouldBe(LocateStatus.NotFound);
+    }
+
+    [Fact]
     public void REQ061_SentToRecycleBin_IsDetected()
     {
         var dir = Make("ToRecycle");

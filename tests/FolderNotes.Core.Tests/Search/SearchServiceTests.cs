@@ -184,7 +184,7 @@ public sealed class SearchServiceTests : IAsyncLifetime
     public async Task REQ061_RelinkedPath_IsSearchable()
     {
         var n = await Add(@"C:\Old\Place", "Wanderer");
-        await _f.Store.RelinkAsync(n.Id, StoreFixture.Folder(@"E:\Newhome"), Ct);
+        await _f.Store.RelinkAsync(n.Id, StoreFixture.Folder(@"E:\Newhome"), null, Ct);
         (await Titles("newhome")).ShouldBe(["Wanderer"]);
         (await Titles(@"path:E:\Newhome")).ShouldBe(["Wanderer"]);
     }

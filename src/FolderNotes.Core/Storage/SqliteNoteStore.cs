@@ -123,9 +123,14 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         return ReadAsync<IReadOnlyList<Note>>(c => QueryNotes(c, query), ct);
     }
 
-    public async Task<Note?> GetByFolderAsync(FolderRef folder, CancellationToken ct = default)
+    public Task<Note?> GetByFolderAsync(FolderRef folder, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(folder);
+        return GetByFolderCoreAsync(folder, retry: true, ct);
+    }
+
+    private async Task<Note?> GetByFolderCoreAsync(FolderRef folder, bool retry, CancellationToken ct)
+    {
 
         var (byId, byPath) = await ReadAsync(c =>
         {
@@ -147,7 +152,7 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         // Step 1: same file ID. The folder may have been renamed or moved, so follow it.
         if (byId is not null)
         {
-            return SameBinding(byId.Folder, folder) ? byId : await TryRebindAsync(byId, folder, ct).ConfigureAwait(false);
+            return SameBinding(byId.Folder, folder) ? byId : await TryRebindAsync(byId, folder, retry, ct).ConfigureAwait(false);
         }
 
         if (byPath is null)
@@ -160,13 +165,22 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         {
             return SameBinding(byPath.Folder, folder) || !folder.HasFileId && byPath.Folder.HasFileId
                 ? byPath
-                : await TryRebindAsync(byPath, folder, ct).ConfigureAwait(false);
+                : await TryRebindAsync(byPath, folder, retry, ct).ConfigureAwait(false);
         }
 
-        // Step 2: same path, different ID. If the original folder is still alive elsewhere, this is a
-        // different folder at the old path. Otherwise it was recreated here, so re-bind (ADR-009).
+        // Step 2: same path, different ID. Another volume at the same path (a different drive at the
+        // same letter) is a different folder (ADR-020). If the original folder is still alive
+        // elsewhere, this is a different folder at the old path. Otherwise it was recreated here, so
+        // re-bind (ADR-009).
+        if (!string.Equals(byPath.Folder.VolumeSerial, folder.VolumeSerial, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
         var original = _options.Identity.Locate(byPath.Folder);
-        return original.Status == LocateStatus.Found ? null : await TryRebindAsync(byPath, folder, ct).ConfigureAwait(false);
+        return original.Status is LocateStatus.NotFound or LocateStatus.InRecycleBin
+            ? await TryRebindAsync(byPath, folder, retry, ct).ConfigureAwait(false)
+            : null;
     }
 
     // ───────────────────────────── notes: writes ─────────────────────────────
@@ -177,7 +191,11 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         return WriteAsync(ctx => UpsertCore(ctx, note, preserveTimestamps: false), ct);
     }
 
-    /// <summary>Import path (T1.7): keeps <c>created_at</c>/<c>updated_at</c> as given.</summary>
+    /// <summary>
+    /// Import path (T1.7): keeps <c>created_at</c>/<c>updated_at</c> as given, and takes the incoming
+    /// folder binding (import is an explicit restore, 03 § Export format). Every other caller keeps an
+    /// existing note's binding and orphan state (ADR-020).
+    /// </summary>
     internal Note UpsertCore(WriteContext ctx, Note note, bool preserveTimestamps)
     {
         var existing = ReadState(ctx, note.Id);
@@ -200,7 +218,13 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
             CreatedAt = created,
             UpdatedAt = updated,
             DeletedAt = null,
-            OrphanedAt = note.OrphanedAt is { } o ? StorageFormat.Truncate(o) : null,
+
+            // An existing note keeps its stored binding and orphan state: only relink / orphan
+            // operations change them, so a stale editor copy can't undo a relink (03, ADR-020).
+            Folder = existing is not null && !preserveTimestamps ? existing.Folder : note.Folder,
+            OrphanedAt = existing is not null && !preserveTimestamps
+                ? existing.OrphanedAt
+                : note.OrphanedAt is { } o ? StorageFormat.Truncate(o) : null,
         };
         NoteValidator.EnsureValid(toSave);
 
@@ -323,18 +347,23 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         return victims.Count;
     }, ct);
 
-    public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default)
+    public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, FolderRef? expectedFolder, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(newFolder);
-        return WriteAsync(ctx => RebindCore(ctx, id, newFolder), ct);
+        return WriteAsync(ctx => RebindCore(ctx, id, newFolder, expectedFolder), ct);
     }
 
-    public Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default) => WriteAsync(ctx =>
+    public Task<bool> SetOrphanedAsync(Guid id, bool orphaned, FolderRef? expectedFolder, CancellationToken ct = default) => WriteAsync(ctx =>
     {
         var state = ReadState(ctx, id) ?? throw new KeyNotFoundException($"Note {id} doesn't exist.");
+        if (expectedFolder is not null && (state.DeletedAt is not null || !state.Folder.SameBindingAs(expectedFolder)))
+        {
+            throw new NoteBindingChangedException(id);
+        }
+
         if (state.DeletedAt is not null || (state.OrphanedAt is not null) == orphaned)
         {
-            return 0;
+            return false;
         }
 
         using var cmd = ctx.Command("UPDATE notes SET orphaned_at = $at WHERE id = $id");
@@ -342,28 +371,35 @@ public sealed partial class SqliteNoteStore : INoteRepository, ILabelRepository,
         cmd.Parameters.AddWithValue("$at", orphaned ? StorageFormat.Timestamp(_options.Clock.GetUtcNow()) : DBNull.Value);
         cmd.ExecuteNonQuery();
         ctx.Raise(id, NoteChangeKind.OrphanStateChanged, state.PathNorm);
-        return 1;
+        return true;
     }, ct);
 
-    private async Task<Note> TryRebindAsync(Note note, FolderRef folder, CancellationToken ct)
+    private async Task<Note?> TryRebindAsync(Note note, FolderRef folder, bool retry, CancellationToken ct)
     {
         try
         {
-            return await WriteAsync(ctx => RebindCore(ctx, note.Id, folder), ct).ConfigureAwait(false);
+            // Conditional on the binding we read (ADR-020): a relink in between wins.
+            return await WriteAsync(ctx => RebindCore(ctx, note.Id, folder, note.Folder), ct).ConfigureAwait(false);
         }
         catch (DuplicateFolderNoteException)
         {
-            return note; // another live note holds the new path. Leave both alone, the orphan scan sorts it out.
+            return note; // another live note holds the new path. Leave both alone; the orphan scan reports it.
         }
-        catch (KeyNotFoundException)
+        catch (Exception ex) when (ex is NoteBindingChangedException or KeyNotFoundException)
         {
-            return note;
+            // Changed under us: look again, once, against the new state.
+            return retry ? await GetByFolderCoreAsync(folder, retry: false, ct).ConfigureAwait(false) : null;
         }
     }
 
-    private static Note RebindCore(WriteContext ctx, Guid id, FolderRef folder)
+    private static Note RebindCore(WriteContext ctx, Guid id, FolderRef folder, FolderRef? expected)
     {
         var state = ReadState(ctx, id);
+        if (expected is not null && state is not null && (state.DeletedAt is not null || !state.Folder.SameBindingAs(expected)))
+        {
+            throw new NoteBindingChangedException(id);
+        }
+
         if (state is null || state.DeletedAt is not null)
         {
             throw new KeyNotFoundException($"Note {id} doesn't exist or is deleted.");

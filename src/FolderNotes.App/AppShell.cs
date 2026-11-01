@@ -33,9 +33,12 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Creates the main window's Labels page. Null when the database couldn't be opened.</summary>
     public Func<Labels.LabelsViewModel>? LabelsFactory { get; set; }
 
+    /// <summary>Creates the main window's Orphaned page. Null when the database couldn't be opened.</summary>
+    public Func<Orphans.OrphansViewModel>? OrphansFactory { get; set; }
+
     public int OpenEditorCount => _editors.Count;
 
-    /// <summary>Label changes reach every open compact editor (ADR-018).</summary>
+    /// <summary>Label changes (ADR-018) and relinks of their note (ADR-020) reach every open compact editor.</summary>
     public Services.INoteEvents? NoteEvents
     {
         set
@@ -43,6 +46,29 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             if (value is not null)
             {
                 value.LabelsChanged += OnLabelsChanged;
+                value.NoteChanged += OnNoteChanged;
+            }
+        }
+    }
+
+    private async void OnNoteChanged(object? sender, Core.Storage.NoteChangedEventArgs e)
+    {
+        if (e.Kind is not (Core.Storage.NoteChangeKind.Relinked or Core.Storage.NoteChangeKind.OrphanStateChanged))
+        {
+            return;
+        }
+
+        foreach (var editor in _editors.Where(w => w.ViewModel.NoteId == e.NoteId).ToArray())
+        {
+            try
+            {
+                await editor.ViewModel.RefreshFolderAsync();
+            }
+#pragma warning disable CA1031 // One editor failing to refresh must not stop the others.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                _log.Error(ex, "Refreshing an editor's folder failed");
             }
         }
     }
@@ -163,6 +189,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             await main.CloseForGoodAsync();
             main.LibraryViewModel?.Dispose();
             main.LabelsViewModel?.Dispose();
+            main.OrphansViewModel?.Dispose();
         }
     }
 
@@ -284,7 +311,13 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     {
         if (_main is null)
         {
-            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), LabelsFactory?.Invoke(), _log);
+            var orphans = OrphansFactory?.Invoke();
+            if (orphans is not null)
+            {
+                orphans.OpenNoteRequested += (_, id) => OpenNote(id);
+            }
+
+            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), LabelsFactory?.Invoke(), orphans, _log);
             _theme.Register(window);
             window.Hidden += (_, _) =>
             {

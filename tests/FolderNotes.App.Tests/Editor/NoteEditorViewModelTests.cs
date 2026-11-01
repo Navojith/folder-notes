@@ -445,6 +445,43 @@ public sealed class NoteEditorViewModelTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ADR020_RelinkWhileOpen_HeaderFollows_NotAnEdit_AndAutosaveKeepsTheNewFolder()
+    {
+        await _store.UpsertAsync(Note.CreateFor(_identity.Resolve(_folder)), Ct);
+        using var vm = await OpenFolderAsync();
+        vm.Title = "typing…"; // a pending edit from before the relink
+        var moved = Directory.CreateDirectory(Path.Combine(_dir, "Archive", "Acme Ltd")).FullName;
+        var stored = (await StoredAsync())!;
+        var target = _identity.Resolve(moved);
+        await _store.RelinkAsync(stored.Id, target, stored.Folder, Ct);
+
+        await vm.RefreshFolderAsync();
+        vm.FolderPath.ShouldBe(target.PathDisplay);
+        vm.FolderKey.ShouldBe(target.PathNorm);
+        vm.FolderExists.ShouldBeTrue();
+
+        await vm.FlushAsync();
+        var now = (await StoredAsync(stored.Id))!;
+        now.Title.ShouldBe("typing…");
+        now.Folder.ShouldBe(target);
+    }
+
+    [Fact]
+    public async Task ADR020_StaleEditorWithoutRefresh_StillCannotUndoARelink()
+    {
+        await _store.UpsertAsync(Note.CreateFor(_identity.Resolve(_folder)), Ct);
+        using var vm = await OpenFolderAsync();
+        var stored = (await StoredAsync())!;
+        var target = _identity.Resolve(Directory.CreateDirectory(Path.Combine(_dir, "Elsewhere")).FullName);
+        await _store.RelinkAsync(stored.Id, target, stored.Folder, Ct);
+
+        vm.Title = "edited";
+        await vm.FlushAsync();
+
+        (await StoredAsync(stored.Id))!.Folder.ShouldBe(target);
+    }
+
+    [Fact]
     public async Task ADR018_ExistingLabelAddedButNotSaved_IsDroppedWhenDeleted()
     {
         using var vm = await OpenFolderAsync();
@@ -482,6 +519,8 @@ public sealed class NoteEditorViewModelTests : IAsyncLifetime
     }
 
     private Task<Note?> StoredAsync() => _store.GetByFolderAsync(_identity.Resolve(_folder), Ct);
+
+    private Task<Note?> StoredAsync(Guid id) => _store.GetByIdAsync(id, Ct);
 
     private sealed class InlineDispatcher : IUiDispatcher
     {
@@ -542,8 +581,8 @@ public sealed class NoteEditorViewModelTests : IAsyncLifetime
 
         public Task<int> PurgeDeletedAsync(TimeSpan olderThan, CancellationToken ct = default) => inner.PurgeDeletedAsync(olderThan, ct);
 
-        public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default) => inner.RelinkAsync(id, newFolder, ct);
+        public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, FolderRef? expectedFolder, CancellationToken ct = default) => inner.RelinkAsync(id, newFolder, expectedFolder, ct);
 
-        public Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default) => inner.SetOrphanedAsync(id, orphaned, ct);
+        public Task<bool> SetOrphanedAsync(Guid id, bool orphaned, FolderRef? expectedFolder, CancellationToken ct = default) => inner.SetOrphanedAsync(id, orphaned, expectedFolder, ct);
     }
 }

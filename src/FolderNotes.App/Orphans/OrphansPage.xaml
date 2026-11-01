@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Orphaned page (specs/05 § Orphaned page, REQ-061, ADR-020). -->
+<UserControl
+    x:Class="FolderNotes.App.Orphans.OrphansPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:FolderNotes.App.Controls"
+    xmlns:domain="using:FolderNotes.Core.Domain"
+    xmlns:local="using:FolderNotes.App.Orphans">
+  <UserControl.Resources>
+    <DataTemplate x:Key="ChipTemplate" x:DataType="domain:Label">
+      <controls:LabelChip LabelName="{x:Bind Name}" ColorKey="{x:Bind Color}" />
+    </DataTemplate>
+
+    <DataTemplate x:Key="OrphanTemplate" x:DataType="local:OrphanItem">
+      <Grid ColumnSpacing="12" RowSpacing="2" Padding="12" Margin="0,4" CornerRadius="{StaticResource CardCornerRadius}"
+            BorderThickness="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <controls:AccentBar ColorKey="{x:Bind AccentColor, Mode=OneWay}" Grid.RowSpan="4" VerticalAlignment="Stretch" />
+
+        <TextBlock Grid.Column="1" Text="{x:Bind Title, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}"
+                   TextTrimming="CharacterEllipsis" MaxLines="1" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right">
+          <controls:StatusPill Status="{x:Bind Status, Mode=OneWay}" />
+          <ItemsRepeater ItemsSource="{x:Bind Chips, Mode=OneWay}" ItemTemplate="{StaticResource ChipTemplate}">
+            <ItemsRepeater.Layout><StackLayout Orientation="Horizontal" Spacing="4" /></ItemsRepeater.Layout>
+          </ItemsRepeater>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Text="{x:Bind PathDisplay, Mode=OneWay}" IsTextSelectionEnabled="True"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+          <FontIcon Glyph="&#xE7BA;" FontSize="14" Foreground="{ThemeResource SystemFillColorCautionBrush}" VerticalAlignment="Top" Margin="0,1,0,0" />
+          <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" MaxWidth="560">
+            <Run Text="{x:Bind ReasonText, Mode=OneWay}" />
+            <Run Text="·" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Run Text="{x:Bind OrphanedText, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          </TextBlock>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Spacing="4" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+          <Button Content="Relink…" Tag="{x:Bind}" Click="OnRelink" IsEnabled="{x:Bind IsIdle, Mode=OneWay}" Style="{StaticResource AccentButtonStyle}"
+                  AutomationProperties.Name="{x:Bind local:OrphansPage.ActionName('Relink', Title), Mode=OneWay}" />
+          <Button Content="Open note" Tag="{x:Bind}" Click="OnOpenNote"
+                  AutomationProperties.Name="{x:Bind local:OrphansPage.ActionName('Open note', Title), Mode=OneWay}" />
+          <Button Tag="{x:Bind}" Click="OnDelete" IsEnabled="{x:Bind IsIdle, Mode=OneWay}" ToolTipService.ToolTip="Delete"
+                  AutomationProperties.Name="{x:Bind local:OrphansPage.ActionName('Delete', Title), Mode=OneWay}">
+            <SymbolIcon Symbol="Delete" />
+          </Button>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Text="{x:Bind Error, Mode=OneWay}" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                   Visibility="{x:Bind local:OrphansPage.HasText(Error), Mode=OneWay}" />
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <Grid Padding="24,16,24,0" RowSpacing="{StaticResource SpacingM}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+    <Grid MaxWidth="900" HorizontalAlignment="Stretch">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="Orphaned" Style="{StaticResource SubtitleTextBlockStyle}" />
+        <TextBlock x:Name="CountText" AutomationProperties.AutomationId="OrphanCount" VerticalAlignment="Bottom" Margin="0,0,0,3"
+                   Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+      <Button x:Name="CheckButton" HorizontalAlignment="Right" AutomationProperties.AutomationId="CheckAgain" Click="OnCheckAgain">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <SymbolIcon Symbol="Refresh" />
+          <TextBlock Text="Check again" />
+        </StackPanel>
+      </Button>
+    </Grid>
+
+    <StackPanel Grid.Row="1" MaxWidth="900" HorizontalAlignment="Left" Spacing="{StaticResource SpacingS}">
+      <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                 Text="These notes' folders can't be found. Nothing has been deleted: relink a note to its folder, or delete the note." />
+      <InfoBar x:Name="CheckBar" AutomationProperties.AutomationId="CheckResult" Severity="Informational" IsOpen="False"
+               Closed="OnCheckBarClosed" />
+      <InfoBar x:Name="UndoBar" AutomationProperties.AutomationId="OrphanUndoBar" Severity="Success" IsOpen="False"
+               AutomationProperties.LiveSetting="Polite" Closed="OnUndoBarClosed">
+        <InfoBar.ActionButton>
+          <Button x:Name="UndoButton" Content="Undo" AutomationProperties.AutomationId="OrphanUndo" Click="OnUndo" />
+        </InfoBar.ActionButton>
+      </InfoBar>
+    </StackPanel>
+
+    <StackPanel x:Name="EmptyState" Grid.Row="2" Visibility="Collapsed" Spacing="8" Margin="0,48,0,0" HorizontalAlignment="Center"
+                AutomationProperties.AutomationId="OrphansEmpty">
+      <FontIcon Glyph="&#xE73E;" FontSize="40" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+      <TextBlock Text="No orphaned notes" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+      <TextBlock Text="Every note's folder was found." HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </StackPanel>
+
+    <ListView x:Name="OrphanList" Grid.Row="3" MaxWidth="900" HorizontalAlignment="Stretch" SelectionMode="None"
+              AutomationProperties.AutomationId="OrphanList" AutomationProperties.Name="Orphaned notes"
+              ItemTemplate="{StaticResource OrphanTemplate}" Padding="0,0,0,16">
+      <ListView.ItemContainerStyle>
+        <Style TargetType="ListViewItem">
+          <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+          <Setter Property="Padding" Value="0" />
+        </Style>
+      </ListView.ItemContainerStyle>
+    </ListView>
+  </Grid>
+</UserControl>

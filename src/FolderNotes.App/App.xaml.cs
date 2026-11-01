@@ -104,6 +104,13 @@ public partial class App : Application
             var editors = _shell.EditorFactory!;
             _shell.LibraryFactory = () => new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
             _shell.LabelsFactory = () => new Labels.LabelsViewModel(store, events, _log);
+
+            // Orphan detection (03, Orphan detection): scheduled scans plus the Orphaned page.
+            var scanner = _services.GetRequiredService<OrphanScanner>();
+            var scans = _services.GetRequiredService<OrphanScanService>();
+            scans.Start();
+            _shell.OrphansFactory = () => new Orphans.OrphansViewModel(
+                store, scanner, scans.ScanNowAsync, _identity, events, uiDispatcher, TimeProvider.System, _log);
             _shell.NoteEvents = events;
             var search = _services.GetRequiredService<ISearchService>();
             _shell.SearchFactory = () => new Search.SearchPaletteViewModel(search, store, uiDispatcher, TimeProvider.System, _log);
@@ -146,6 +153,8 @@ public partial class App : Application
             services.AddSingleton<SearchService>();
             services.AddSingleton<ISearchService>(sp => sp.GetRequiredService<SearchService>());
             services.AddSingleton<UiNoteEvents>();
+            services.AddSingleton(sp => new OrphanScanner(sp.GetRequiredService<INoteRepository>(), _identity));
+            services.AddSingleton(sp => new OrphanScanService(sp.GetRequiredService<OrphanScanner>().ScanAsync, TimeProvider.System, _log));
         }
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
@@ -191,7 +200,7 @@ public partial class App : Application
             }
             if (_services is not null)
             {
-                await _services.DisposeAsync(); // tray icon, search service, UI relay
+                await _services.DisposeAsync(); // tray icon, search service, UI relay, orphan scans
             }
 
             if (_store is not null)

@@ -56,7 +56,7 @@ public sealed class LibraryViewModelTests : IAsyncLifetime
         var b = await AddAsync(@"D:\B", "Beta");
         var gone = await AddAsync(@"D:\C", "Gone");
         await _store.DeleteAsync(gone.Id, Ct);
-        await _store.SetOrphanedAsync(a.Id, true, Ct);
+        await _store.SetOrphanedAsync(a.Id, true, null, Ct);
 
         using var vm = await OpenAsync();
 
@@ -278,6 +278,22 @@ public sealed class LibraryViewModelTests : IAsyncLifetime
     }
 
     // ───────────── selection + detail ─────────────
+
+    [Fact(Timeout = 20_000)]
+    public async Task ADR020_Relink_TheDetailEditorShowsTheNewFolder()
+    {
+        var a = await AddAsync(@"D:\A", "A");
+        using var vm = await OpenAsync();
+        await vm.SelectAsync(a.Id);
+        var target = new FolderRef(@"E:\NEW HOME\A", @"E:\New home\A", null, null);
+        await _store.RelinkAsync(a.Id, target, a.Folder, Ct);
+
+        await vm.ApplyChangeAsync(new NoteChangedEventArgs(a.Id, NoteChangeKind.Relinked, target.PathNorm));
+
+        vm.Detail!.FolderPath.ShouldBe(@"E:\New home\A");
+        vm.Detail.SaveState.ShouldBe(SaveState.None);
+        vm.Rows.Single().PathDisplay.ShouldBe(@"E:\New home\A");
+    }
 
     [Fact(Timeout = 20_000)]
     public async Task REQ054_Select_OpensTheDetailEditor_AndSwitchingFlushesIt()
@@ -525,8 +541,8 @@ public sealed class LibraryViewModelTests : IAsyncLifetime
 
         public Task<int> PurgeDeletedAsync(TimeSpan olderThan, CancellationToken ct = default) => inner.PurgeDeletedAsync(olderThan, ct);
 
-        public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default) => inner.RelinkAsync(id, newFolder, ct);
+        public Task<Note> RelinkAsync(Guid id, FolderRef newFolder, FolderRef? expectedFolder, CancellationToken ct = default) => inner.RelinkAsync(id, newFolder, expectedFolder, ct);
 
-        public Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default) => inner.SetOrphanedAsync(id, orphaned, ct);
+        public Task<bool> SetOrphanedAsync(Guid id, bool orphaned, FolderRef? expectedFolder, CancellationToken ct = default) => inner.SetOrphanedAsync(id, orphaned, expectedFolder, ct);
     }
 }

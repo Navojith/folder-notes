@@ -11,14 +11,22 @@ public enum LocateStatus
     /// <summary>The folder still exists, but in the Recycle Bin (S4). Treat it as orphaned, don't relink.</summary>
     InRecycleBin,
 
-    /// <summary>The folder is gone (REQ-061 orphan).</summary>
+    /// <summary>The volume is mounted, but the folder's ID is gone: deleted (REQ-061 orphan).</summary>
     NotFound,
+
+    /// <summary>
+    /// No mounted volume has the stored serial (a disconnected drive). The folder may come back,
+    /// and a folder at the same path now belongs to another volume (ADR-020).
+    /// </summary>
+    VolumeNotMounted,
 }
 
 /// <summary>Where a stored folder is now. <see cref="Path"/> is a display path when the status isn't NotFound.</summary>
 public sealed record LocateResult(LocateStatus Status, string? Path)
 {
     public static LocateResult NotFound { get; } = new(LocateStatus.NotFound, null);
+
+    public static LocateResult VolumeNotMounted { get; } = new(LocateStatus.VolumeNotMounted, null);
 }
 
 /// <summary>Folder identity (REQ-060…063, specs/02-architecture.md, specs/03-data-model.md).</summary>

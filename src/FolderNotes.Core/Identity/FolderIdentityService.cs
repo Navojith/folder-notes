@@ -98,7 +98,7 @@ public sealed class FolderIdentityService : IFolderIdentityService
                 : LocateResult.NotFound;
         }
 
-        return LocateResult.NotFound; // volume not mounted
+        return LocateResult.VolumeNotMounted; // no mounted volume has this serial (ADR-020)
     }
 
     internal static string FormatSerial(ulong volumeSerial) => volumeSerial.ToString("X16", CultureInfo.InvariantCulture);

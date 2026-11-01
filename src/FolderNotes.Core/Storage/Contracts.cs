@@ -106,6 +106,35 @@ public sealed class DuplicateFolderNoteException : Exception
     public Guid ExistingNoteId { get; }
 }
 
+/// <summary>
+/// The note's folder binding isn't what the caller expected: it was relinked, re-bound or deleted
+/// in the meantime (03 § Relink rules, ADR-020). Nothing was changed.
+/// </summary>
+public sealed class NoteBindingChangedException : Exception
+{
+    public NoteBindingChangedException(Guid noteId)
+        : base($"Note {noteId} was relinked or changed in the meantime.")
+    {
+        NoteId = noteId;
+    }
+
+    public NoteBindingChangedException()
+    {
+    }
+
+    public NoteBindingChangedException(string message)
+        : base(message)
+    {
+    }
+
+    public NoteBindingChangedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public Guid NoteId { get; }
+}
+
 /// <summary>REQ-010: a label with that name (ignoring case) already exists.</summary>
 public sealed class DuplicateLabelException : Exception
 {
@@ -174,10 +203,20 @@ public interface INoteRepository
     Task<IReadOnlyList<Note>> ListAsync(NoteQuery query, CancellationToken ct = default);
     Task<int> PurgeDeletedAsync(TimeSpan olderThan, CancellationToken ct = default);
 
-    /// <summary>Binds the note to another folder (REQ-061 Relink…). Clears the orphan flag.</summary>
-    Task<Note> RelinkAsync(Guid id, FolderRef newFolder, CancellationToken ct = default);
+    /// <summary>
+    /// Binds the note to another folder (REQ-061 Relink…) and clears the orphan flag, without touching
+    /// its content or <c>updated_at</c>. With <paramref name="expectedFolder"/>, the stored binding must
+    /// still equal it, else <see cref="NoteBindingChangedException"/> and nothing changes (ADR-020).
+    /// Also throws <see cref="DuplicateFolderNoteException"/> (another live note has the folder) and
+    /// <see cref="KeyNotFoundException"/> (missing or deleted).
+    /// </summary>
+    Task<Note> RelinkAsync(Guid id, FolderRef newFolder, FolderRef? expectedFolder, CancellationToken ct = default);
 
-    Task SetOrphanedAsync(Guid id, bool orphaned, CancellationToken ct = default);
+    /// <summary>
+    /// Sets or clears <see cref="Note.OrphanedAt"/>. False when it already was so (or the note is
+    /// deleted). <paramref name="expectedFolder"/> works as in <see cref="RelinkAsync"/>.
+    /// </summary>
+    Task<bool> SetOrphanedAsync(Guid id, bool orphaned, FolderRef? expectedFolder, CancellationToken ct = default);
 
     event EventHandler<NoteChangedEventArgs>? NoteChanged;
 }

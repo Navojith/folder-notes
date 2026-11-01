@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.7 Orphaned view + relink
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.8 Settings page
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 6 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 7 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -43,7 +43,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.4 Library view | ✅ | 2026-11-01 | `0453133` | ADR-017; main window reused; O-9 and O-17 closed; live UIA check + `perf-check` on Release |
 | T2.5 Labels manager | ✅ | 2026-11-01 | `a5a4487` | ADR-018; REQ-012 "Settings → Labels" resolved as its own page; live UIA check + `perf-check` |
 | T2.6 Search palette + global hotkey | ✅ | 2026-11-01 | `5a26e3f` | ADR-019; "windows used" budget 90 → 100 MB (user, ADR-016 amendment); live UIA check with the real hotkey |
-| T2.7 Orphaned view + relink | ⚪ next | | | |
+| T2.7 Orphaned view + relink | ✅ | 2026-11-01 | (this commit) | ADR-020 (integrity rules), ADR-021 (pages built in code; fixes a T2.6 crash); live UIA check with the real folder picker + `perf-check` |
+| T2.8 Settings page | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -79,6 +80,10 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | NFR-06 idle CPU after using the library | <0.1 % | 0 % | `perf-check` T2.4 | ✅ |
 | REQ-080 all windows used (editor + main + palette) | <100 MB (was 90) | max 94.2 MB open, 93.3 MB after close (≈116 MB private bytes); the palette adds ≈10 MB once | `perf-check` T2.6 | ✅ |
 | NFR-06 growth, 8 palette cycles | ≤4 MB | +3.3 MB by the rule (cycle 2's after-close reading dipped to 87.9 MB); open readings flat at 92–94 MB, so no growth | `perf-check` T2.6 | ✅ (watch) |
+| NFR-06 growth, 8 palette cycles (re-run) | ≤4 MB | +0.5 MB; open readings flat at 77–79 MB. The T2.6 +3.3 MB didn't reproduce | `perf-check` T2.7 | ✅ (still watched) |
+| REQ-080 all windows used (re-run) | <100 MB | max 78.8 MB open, 78.5 MB closed (≈98 MB private bytes); tray-only 34 MB; editor ≤ 68.4 MB; main ≤ 77 MB. About 15 MB under T2.6's 94.2 MB; not investigated (no change aimed at memory), so treat it as run-to-run variation until O-16 re-baselines | `perf-check` T2.7 | ✅ |
+| REQ-080 main window, Orphaned page visited | <100 MB | 73.2 MB vs 70.5 MB on All notes only (+2.7 MB once); 77.4 MB with Labels visited too | T2.7 (manual) | ✅ |
+| Orphan scan cost | (no target) | 5 notes in 21 ms (startup scan, Release); 10k-note cost measured at T5.5 (ADR-020) | T2.7 | ✅ |
 | REQ-080 main window, Labels page visited | <90 MB | 81.8 MB open (102 MB private bytes) vs 77.5 MB on All notes only; 79.2 MB after close | T2.5 (manual) | ✅ (about 8 MB headroom) |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
@@ -106,6 +111,8 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-18 | "Windows used" over the 90 MB budget once the search palette exists: 91–93 MB with editor + main window + palette used, flat over 8 cycles each; the palette costs ≈10 MB | REQ-080 / ADR-016 | T2.6 | **closed** 2026-11-01: the user raised the budget to 100 MB (ADR-016 amendment); `perf-check` passes against it |
 | O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
+| O-19 | Orphan scan reads full notes (`ListAsync`) to classify them; measure at 10k notes and switch to a binding-only query if it costs (memory or time) | ADR-020 | T5.5 | open |
+| O-20 | Relinking many notes after a parent folder moved to another drive is one *Relink…* per note; a "relink the others under the same parent" helper could come later (not in v1 scope) | 05 § Orphaned page | post-v1 / user's call | open |
 
 ## Blockers
 
@@ -130,6 +137,34 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.7)
+- **T2.7 done:** the **Orphaned** page (reasons, *Check again*, *Relink…* through the system folder
+  picker with Undo, Delete with Undo, Open note, a count badge on the nav item) and a scheduled
+  orphan scan (10 s after start, every 6 h). 683/683 tests green in Release (Core 366 → 392, App 264 → 291).
+- **Spec changes made first:** REQ-060/061 acceptance criteria (01), 03 § Orphan detection (the
+  classification table) and § Relink rules, the Upsert binding rule, 05 § Orphaned page, 02 § Orphaned
+  page and orphan scan + interface changes, the T2.7 *Done when*, ADR-020 (amends ADR-009).
+- **Data-integrity fixes found while reviewing the T1.5 code (ADR-020):** (1) the "recreated at the
+  same path" rule didn't check the volume, so another drive mounted at the same letter could take a
+  note and overwrite its file ID; (2) an editor autosave wrote back its old folder binding, which
+  would silently undo a relink; (3) a scan decision could overwrite a relink made in between;
+  (4) a re-bind blocked by another note left the note pointing at a stale path, neither attached
+  nor orphaned. Now: same volume only, conditional writes everywhere, Upsert keeps the binding,
+  conflicts orphan the moving note and change neither. Import keeps its documented restore
+  behaviour (the one Core test that relied on it).
+- **Found live:** opening **Labels or Settings crashed the app since T2.6** (`5a26e3f`): `FindName`
+  returns null for `x:Load` elements declared in a Window (confirmed on a HEAD build). T2.6's live
+  check didn't open those pages. Fixed by creating pages in code on first visit (ADR-021); all three
+  pages checked live. Also: `CommitButtonText` works on the WinAppSDK picker; the picker's Folder box
+  is a legacy Edit (UIA needs `WM_SETTEXT`).
+- **Memory:** `perf-check` passes; the T2.6 palette growth reading (+3.3 MB) didn't reproduce
+  (+0.5 MB), so no investigation, as agreed; still watched. Readings this run were ≈15 MB lower than
+  T2.6 across the main window and palette with no memory-related change; not chased. O-16 stays open.
+- **Live-check data:** the dev database was backed up before seeding and restored afterwards
+  (byte-identical). One folder went through the user's Recycle Bin and was restored from it.
+  `C:\Temp\FolderNotesE2E\T27` is left on disk (folders only, no notes reference it).
+- **Next:** T2.8 Settings page (it replaces `SettingsStubPage`).
 
 ### 2026-11-01 (T2.6)
 - **T2.6 done:** the search palette. `Ctrl+Alt+N` from anywhere (also the tray and `--search`)

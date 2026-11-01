@@ -9,7 +9,7 @@ requirement ID, e.g. `REQ060_Rename_KeepsNoteAttached`.
 | Layer | Tooling | Covers |
 |---|---|---|
 | Core unit | xunit.v3 + Shouldly, in-memory/temp-file SQLite | repository, validation (REQ-002), labels, search parsing & ranking (REQ-051/052/023), path normalization (REQ-063), migrations |
-| Identity integration | xunit.v3 on real temp folders (NTFS) | rename/move tracking (REQ-060), orphan detection (REQ-061), `OpenFileById` relink |
+| Identity integration | xunit.v3 on real temp folders (NTFS), plus a fake identity for what one disk can't show (another volume at the same letter, an unmounted volume) | rename/move tracking (REQ-060), orphan detection and relink rules (REQ-061, 03 § Orphan detection / § Relink rules, ADR-020): deleted, moved, recreated, Recycle Bin, drive unavailable, same-named folders, conflicts, concurrent changes, content unchanged |
 | App services | xunit.v3 + fakes | ReminderService due/snooze/once logic (REQ-021/024), autosave debounce (REQ-005), undo (REQ-006), single-instance arg routing |
 | Explorer tracker | Integration tests driving real Explorer (`explorer.exe <path>`, `IShellWindows` navigate) — run locally and on a Windows CI runner with a desktop session | REQ-031 latency, REQ-034 tabs, virtual folders → null |
 | Shell extension | GoogleTest on the DLL's pure functions (path normalize, tooltip formatting, query) + a harness that `CoCreateInstance`s the handler out of Explorer and measures `GetInfoTip` latency | REQ-040/041/042 |

@@ -324,6 +324,30 @@ public sealed partial class NoteEditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>
+    /// The note was relinked or its orphan state changed elsewhere (ADR-020): show the new folder
+    /// without counting it as an edit. The baseline takes the stored binding, so later saves keep it
+    /// (the store keeps it regardless, 03 § Repository rules).
+    /// </summary>
+    public async Task RefreshFolderAsync()
+    {
+        if (_disposed || _saved is not { } saved || State is not (EditorState.Editing or EditorState.Deleted))
+        {
+            return;
+        }
+
+        var stored = await _notes.GetByIdAsync(saved.Id);
+        if (_disposed || stored is null || _saved is not { } current || current.Id != stored.Id)
+        {
+            return;
+        }
+
+        _saved = current with { Folder = stored.Folder, OrphanedAt = stored.OrphanedAt };
+        FolderPath = stored.Folder.PathDisplay;
+        FolderExists = _directoryExists(stored.Folder.PathDisplay);
+        OnPropertyChanged(nameof(FolderKey));
+    }
+
     /// <summary>The palette colour used by the fewest labels; ties go to palette order (05).</summary>
     public string NextLabelColor()
     {

@@ -115,6 +115,24 @@ hides the badge (REQ-022).
 | REQ-062 | S | Folders on network shares and removable drives shall be supported by path (with no rename tracking), and shall be marked as such in the UI. |
 | REQ-063 | M | Path matching shall be case-insensitive and normalized (trailing slashes, `\\?\` prefixes, mapped drive vs UNC). |
 
+**AC (REQ-060/061, T2.7):** *data integrity comes first: an orphaned note is acceptable, a note
+attached to the wrong folder or a lost note is not (ADR-020).*
+- A renamed or moved folder (same volume) keeps its note; the next check (or the next lookup)
+  updates the stored path.
+- A deleted folder's note is marked orphaned and listed in the Orphaned view with the reason. It's
+  never deleted automatically.
+- A note is only re-attached automatically to the **same folder** (followed by file ID), or to a
+  folder recreated at the **same path on the same volume** (ADR-009). Never to a folder that
+  merely has the same name, and never to a folder on another drive mounted at the same letter.
+- When the folder a note should move to already has another note, neither note changes; the
+  moving one is orphaned with the reason "another note is attached there".
+- *Relink…* is explicit: the user picks the folder; a folder with a different name asks first; a
+  folder that has a note, a file, or a folder in the Recycle Bin is refused with a message and
+  nothing changes. After a relink, **Undo** puts the note back for 10 s.
+- Relinking, orphaning and undo never change the note's title, body, labels, status, dates,
+  accent colour or created/updated times. An autosave from an editor that's open on the note never
+  undoes a relink.
+
 ## H. Portability (opt-in)
 
 | ID | Pri | Requirement |
