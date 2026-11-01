@@ -288,8 +288,8 @@ smoke tests pass.
     terminal update their titles. *(P4, the `rundll32` private-server behaviour, needs a disposable session: see
     T3.2.5 and D5.)* *Done when:* each probe has a measured result in 04 and ADR-025 is updated; if P1 or P2 fail,
     the spec is amended (CsWin32; abandon-only time-boxing) before T3.2.2 starts.
-  - [ ] **T3.2.2 🧱 Pure logic** (`TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`,
-    `ActiveFolderState`, `FakeShellWindowsGateway`) and their unit tests (06 § ExplorerTracker tests, *Logic*).
+  - [x] **T3.2.2 🧱 Pure logic** *(done 2026-11-01: 146 tests, 4 mutation checks; interpretations in 04 § I; open questions Q1, Q2 in 09)* (`TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`,
+    `ActiveFolderState`, plus `StatePublisher`, `EvaluationWatchdog`, `ForegroundResolver`, `RootValidator`; the `FakeShellWindowsGateway` moves to T3.2.3 with the interface) and their unit tests (06 § ExplorerTracker tests, *Logic*).
     *Done when:* all logic tests pass with `FakeTimeProvider`, no Win32/COM referenced from these types.
   - [ ] **T3.2.3 🧱 COM layer:** typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA host with
     message loop, watchdog (cancel → abandon → circuit breaker). *Done when:* the COM, stale/disconnected and

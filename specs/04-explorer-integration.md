@@ -386,6 +386,33 @@ verified end to end in T3.2.5 and T3.5.
 
 **P4** (shell down, `rundll32` private server) is not run: it needs Explorer killed (D5). It stays open as O-24.
 
+#### I. Interpretations fixed while implementing the pure logic (T3.2.2, 2026-11-01)
+
+The wording above left these open; the code and its tests now fix them (`src/FolderNotes.App/Explorer/`):
+- **Ladder offsets** (D.4: +50, +150, +400, +1000 ms) are measured from the *start of the first failing evaluation*, not
+  between rungs. A rung already overdue when its predecessor finishes runs at once. Retries respect the throttle window.
+- **Only signal-driven failures start a ladder.** A failing poll or reconcile neither starts, restarts nor cancels one, so
+  "then stop until the next signal" holds and a persistent failure costs one read per poll interval, not a ladder per poll.
+  A good read ends any ladder. When the last rung fails the scheduler reports `LadderExhausted`; the host then marks the
+  frame unresolved (G, L8). *That per-frame memory is host state and is built in T3.2.4.*
+- **A confirm pass never chains another confirm.** "Changed" means the evaluation changed what was published.
+- **Poll timing:** the next poll is due one interval after the last *completed* evaluation; the interval is 500 ms while the
+  last signal is < 10 s old and 2 s after that; any signal returns it to 500 ms. Timed work (confirm, retry, reconcile, poll)
+  never starts inside a throttle window; it waits for the window to end. Any evaluation satisfies a due confirm and retry; a
+  due reconcile rides on whichever evaluation runs next (`Rebuild = true`).
+- **Newest-seen sequence:** a sequence is taken when an evaluation starts and counts as "seen" when it finishes, whether it
+  published, was a no-op or produced nothing. Anything older that finishes later is dropped, so a stale read can never replace a
+  newer one, even if the newer one was a transient failure.
+- **Breaker window:** a wedge counts while its age is *below* 10 minutes (a wedge exactly 10 minutes old has expired).
+- **Disabled:** `Stop()` leaves a Disabled tracker Disabled and keeps the process slot (no second tracker may take its place);
+  `Start()` is refused; only `Retry()` leaves it.
+- **Abandon ordering:** `OnWedge()` invalidates the publisher's generation (publishing Inactive) before it returns a
+  replacement, so an abandoned worker cannot publish at any moment a replacement exists.
+- **Cache recency:** a rebuild replacing a known tab's handle does not count as a use; only `TryGet` does.
+- Added pure parts the plan implied: `StatePublisher` (the single publish gate), `EvaluationWatchdog`, `ActiveTabResolver`,
+  `ForegroundResolver`, `RootValidator`. `FakeShellWindowsGateway` is **not** built here: the gateway interface is defined in
+  T3.2.3, and T3.2.2's tests use a test-only `FakeExplorerWorld`.
+
 ### Docking the panel (`PanelDocker`)
 
 - The panel is a WinUI 3 window with no title bar (`OverlappedPresenter`, `IsResizable` width

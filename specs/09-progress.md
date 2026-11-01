@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.2 pure logic (T3.2.1 probes done; T2.9 partial, see O-22)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.3 COM layer, **after the user answers Q1 and Q2** (T3.2.2 done; T2.9 partial, see O-22)
 
 ---
 
@@ -47,6 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
+| T3.2.2 Tracker pure logic | ✅ | 2026-11-01 | this commit | `TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine` (+ publisher, watchdog, resolvers, root validator); 146 new tests, App 334 → 480, Core 396; no COM/Win32 (guard test); 4 mutation checks caught. Spec 04 § I records the interpretations; Q1/Q2 open |
 | T3.2.1 Tracker probes (S5) | ✅ | 2026-11-01 | this commit | P1 interop validated vs SDK headers, P2 `CoCancelCall` works on an out-of-process proxy, P3 one path route (0.36 ms), P5 scoped hooks remove foreign callbacks; P4 deferred (D5). Spec corrected (release API, `Gone` via `IsWindow`, `LocationURL` dropped) |
 | T3.1 Context menu verbs | ✅ | 2026-11-01 | `2772509` + this commit | ADR-024: installer-only registration, manual toggle + Repair in Settings, never automatic. Both live checks passed: Settings card by UIA (Off/On/Stale/Repair/forced failure) and the real Explorer menu (folder and background verbs, special-character path, unregister removes both) |
 
@@ -134,6 +135,13 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | D4 | Time-boxing by `CoCancelCall` then abandon-and-replace the thread, with a 3-wedge circuit breaker | As specified | An abandoned thread and its COM objects are leaked on purpose (bounded by the breaker). If P2 shows cancel doesn't work against Explorer proxies, only the abandon step remains and its 1 s becomes the effective limit | **DECIDED: accept with hard bounds** (04 B.6); no safe-cancel claim without P2 evidence
 | D5 | May the real "kill explorer.exe" test (and P4) run on this dev desktop? | No: disposable session or VM only; one supervised manual run at T3.5 if you agree | Killing the shell closes every Explorer window you have open (it restarts by itself). Without it, restart recovery is verified by fault injection only (O-24) | **DECIDED: no**; VM only; O-24 open
 
+## Open questions raised by T3.2.2 (need the user before T3.2.3)
+
+| # | Question | Why it matters | Recommendation |
+|---|---|---|---|
+| Q1 | **The spec contradicts itself on Retry.** 04 B.6 says the breaker trips at 3 wedges in 10 min *and* that at most 3 threads are ever abandoned ("at 3 the tracker stays Disabled until the app restarts"). Every wedge abandons a thread, so a breaker trip always uses up the whole cap: the Settings **Retry** can never succeed in that process (test `NFR01_With_the_default_limits_Retry_after_a_trip_is_refused_see_question_Q1` documents it). The code takes both numbers as limits and ships the literal values. | The Retry button and the thread supervisor in T3.2.3/T3.4 | Keep the breaker at 3 wedges / 10 min and raise the lifetime cap to **6** (two breaker episodes, so one Retry works, then it needs an app restart). Still strictly bounded. One constant plus a spec edit. |
+| Q2 | **Where do the WinEvent hooks live?** The spec has them on the single STA worker. If that worker wedges and is abandoned, its hooks stay installed on a thread that never pumps (hooks are installed by, and delivered to, one thread; whether another thread can unhook them is unverified, and the zombie's queue keeps filling). S5/P2 also showed callbacks run *inside* the worker's COM waits. | Thread design of T3.2.3/T3.2.4; the bound "abandoned threads cannot do anything" | Put the hooks on a tiny separate **hook thread** that never makes COM calls and only posts to the worker. A wedge then strands nothing, replacement does not reinstall hooks, and callbacks never run inside a COM wait. Costs one more (idle) thread; the COM thread rules (one STA, at most 1 live, at most cap abandoned) are unchanged. A short probe (P6: cross-thread `UnhookWinEvent`, zombie queue growth) is only needed if you prefer to keep the hooks on the worker. |
+
 ## Blockers
 
 | Since | Blocker | Needed from | Status |
@@ -158,6 +166,13 @@ missing (2026-10-31, 10.0.403 installed).
 
 Newest first. One entry per session: what changed, what was learned, what's next.
 
+### 2026-11-01 (T3.2.2 pure logic)
+- **Done:** `src/FolderNotes.App/Explorer/`: `TabMap<THandle>` (+ `ActiveTabResolver`, `ForegroundResolver`), `EvaluationScheduler` (throttle with leading/trailing edge, confirm, retry ladder, poll, reconcile; no timers, driven by a `TimeProvider`), `ComFailureClassifier`, `TrackerStateMachine` (+ `TrackerProcessGuard`, `TrackerLimits`, recovery back-off, `RootValidator`), `StatePublisher` (the single gate: generations, newest-seen sequence, no-op suppression), `EvaluationWatchdog` (cancel at 250 ms, abandon 1 s after the cancel, inclusive boundaries). No COM, Win32 or UI; a source-guard test enforces it, and that `AppShell`/`App` do not reference the tracker.
+- **Tests:** 146 new (`tests/FolderNotes.App.Tests/Explorer/`): classifier table; map add/replace/remove/evict/dispose-once (a 1000-rebuild churn leaves 0 live handles); scheduler coalescing, boundaries, ladder, poll back-off, reconcile; publisher ordering (shuffled arrival, older-after-newer, older-after-no-op, older-after-failure) and abandoned-generation silence including a 4-thread concurrency test; watchdog boundaries to the tick; breaker activation/expiry/boundary/recovery, process-wide thread cap, one tracker per process, one live worker; a fake-world simulation (rapid navigation ends on the final folder with about one evaluation per 30 ms, lost events converge within 2 s, transient/gone failures, tab switches, restart, late-registered window, wedge plus zombie result). Full suites in Release: App 480 passed (was 334), Core 396 passed. Four deliberate breakages (stale-sequence guard, generation guard, throttle window, breaker) each made tests fail; all reverted.
+- **Found while implementing:** (1) a failing poll would restart the retry ladder every interval and pre-empt rung 4; polls now leave the ladder alone (04 § I). (2) The spec's own limits contradict each other (Q1). (3) Hooks on the worker thread are an unexamined risk once the worker is abandoned (Q2).
+- **Deviations from the written spec:** none that change behaviour; clarifications are in 04 § I. `FakeShellWindowsGateway` moved to T3.2.3; the per-frame "unresolved" memory (L8) is left to T3.2.4 (the scheduler already reports `LadderExhausted`). No COM code was started.
+- **Next:** answers to Q1 and Q2, then T3.2.3.
+
 ### 2026-11-01 (T3.2.1 probes, spike S5)
 - **Decisions D1–D5 recorded and committed (`596f97f`), ADR-025 accepted.** Added the user's safeguards to 04: validate every signature (CsWin32 on unreliability, no workarounds), bounded staleness without events (≤ 2 s via the poll), ordering/no-flicker/no-redundant-update rules, hard thread bounds (one tracker, ≤ 1 live + ≤ 3 abandoned threads, generation-gated publishing), elevated Explorer = no path and no retry loop.
 - **Probes (`spikes/S5-tracker-probes`, never shipped), results in 04 § H:**
@@ -168,7 +183,7 @@ Newest first. One entry per session: what changed, what was learned, what's next
   - **P4** not run (needs Explorer killed; D5). O-24 stays open.
 - **Probe-code bugs, not findings:** the cancel server first hung because `[STAThread]` Main made the "MTA" server STA; `IOleWindow` is input-synchronous and unusable in the scratch server; `SetWindowText` on a hidden STATIC raises no `NAMECHANGE` (used `NotifyWinEvent`). A timeout once left a scratch server and its HKCU CLSID key behind; both were removed and the probe now cleans up in `finally`.
 - **Housekeeping:** the probes opened Explorer windows and closed only their own (one pre-existing window of yours was not touched); no FolderNotes process, registry key or `rundll32` left.
-- **Next:** T3.2.2 pure logic and tests.
+- **Next:** T3.2.2 pure logic and tests *(done, see the entry above)*.
 
 ### 2026-11-01 (T3.2 specification, no code)
 - **Specs written first, no implementation:** 04 § ExplorerTracker design (A–G: structure, COM interop, tab cache, coalescing, path reading, reliability/recovery, Windows/COM limits L1–L12; replaces the old step list and the "debounced to 50 ms" line); 04 § 4.4 and 02 (`IExplorerTracker` now has `Current`, `Start`/`Stop`, `NotifyShellRestarted`, `GetStats`; event is `{FrameHwnd, TabHwnd, Path?, Sequence}`, no `RECT`); 06 § ExplorerTracker tests; 07 T3.2 split into T3.2.1–T3.2.5; ADR-025 (*proposed*); ADR-004 marked partly superseded; O-23, O-24 and decisions D1–D5 above.
