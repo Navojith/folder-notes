@@ -147,10 +147,21 @@ attached to the wrong folder or a lost note is not (ADR-020).*
 | ID | Pri | Requirement |
 |---|---|---|
 | REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and stays within these memory budgets: **tray-only < 50 MB**; **any window open, or used and closed again, < 100 MB** (was 90 MB until T2.6); **Explorer companion panel active < 110 MB**. *Memory = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction. Private bytes are recorded next to it but have no budget. These are initial engineering targets, re-baselined after Phase 3 (ADR-016, O-16). Checked by `eng/perf-check.ps1` (06 § Resource budgets).* |
-| REQ-081 | M | Settings: panel on/off/position/width, hide-when-empty, tooltip on/off, hotkey, start with Windows, theme (system/light/dark), reminder time of day. |
+| REQ-081 | M | Settings: panel on/off/position/width, hide-when-empty, tooltip on/off, hotkey, start with Windows, theme (system/light/dark), reminder time of day. *Each setting arrives with its feature: theme, hotkey and start with Windows in T2.8; the panel ones in T3.4; tooltip on/off in T4.3; reminder time in T5.1 (05 § Settings page).* |
 | REQ-082 | M | The UI shall follow the system theme and accent color and use Mica/Acrylic backdrops where available. |
 | REQ-083 | M | All UI shall be keyboard-navigable and screen-reader labelled (UIA names), with WCAG AA contrast. |
 | REQ-084 | S | Automatic local backup of the database, daily, keeping the last 7 copies. |
+
+**AC (REQ-080 start with Windows, REQ-081, T2.8):**
+- Every setting is saved when changed and is in effect after a restart; the theme applies before
+  the first window opens.
+- A new search shortcut works at once and the old one stops working. A shortcut another app owns
+  is refused with a message and the current one keeps working. A shortcut that couldn't be
+  registered at startup is shown as a warning in Settings.
+- *Start with Windows* shows whether the app is really registered (the Run entry), and turning it
+  on or off adds or removes that entry. "Default on" is applied by the installer (T6.1); the app
+  itself never registers on its own (ADR-022).
+- The library's sort, view and filters survive a restart.
 
 ## Non-functional requirements
 

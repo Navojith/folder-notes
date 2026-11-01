@@ -36,6 +36,9 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Creates the main window's Orphaned page. Null when the database couldn't be opened.</summary>
     public Func<Orphans.OrphansViewModel>? OrphansFactory { get; set; }
 
+    /// <summary>Creates the main window's Settings page. Null when the database couldn't be opened.</summary>
+    public Func<Settings.SettingsViewModel>? SettingsFactory { get; set; }
+
     public int OpenEditorCount => _editors.Count;
 
     /// <summary>Label changes (ADR-018) and relinks of their note (ADR-020) reach every open compact editor.</summary>
@@ -118,6 +121,9 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
 
     public void ShowMainWindow() => Show(null);
 
+    /// <summary>The tray's Settings: the main window on the Settings page (05 § Settings page).</summary>
+    public void ShowSettings() => Show(null).ShowSettings();
+
     public void OpenEditor(string folderPath) =>
         OpenEditorWindow(vm => vm.LoadForFolderAsync(folderPath), $"--edit {folderPath}");
 
@@ -190,6 +196,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
             main.LibraryViewModel?.Dispose();
             main.LabelsViewModel?.Dispose();
             main.OrphansViewModel?.Dispose();
+            main.SettingsViewModel?.Dispose();
         }
     }
 
@@ -317,7 +324,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
                 orphans.OpenNoteRequested += (_, id) => OpenNote(id);
             }
 
-            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), LabelsFactory?.Invoke(), orphans, _log);
+            var window = _main = new MainWindow(_theme, LibraryFactory?.Invoke(), LabelsFactory?.Invoke(), orphans, SettingsFactory?.Invoke(), _log);
             _theme.Register(window);
             window.Hidden += (_, _) =>
             {

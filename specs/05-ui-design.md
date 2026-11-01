@@ -64,7 +64,7 @@ panel and search.
 **Theme.** `ThemeService` holds the app theme (`System` / `Light` / `Dark`, REQ-081). Every
 window registers with it; the service sets `RequestedTheme` on the window's root element and the
 title-bar theme (`AppWindow.TitleBar.PreferredTheme`) and re-applies when the setting changes.
-`System` follows the Windows app mode live. Persisting the choice is T2.8.
+`System` follows the Windows app mode live. The choice is saved (T2.8) and applied at startup before any window opens.
 
 **Backdrops.** Main window and compact editor: `MicaBackdrop`. Panel and search palette:
 `DesktopAcrylicBackdrop`. Both fall back to the solid theme background automatically where
@@ -228,6 +228,65 @@ Labels  6 labels
 - **UIA:** rows are named "Label <name>, used by N notes"; the buttons are named "Rename <name>",
   "Colour of <name>", "Delete <name>", "Show notes with <name>".
 
+#### Settings page (T2.8)
+
+The **Settings** item sits in the footer of the navigation rail. The tray menu's *Settings* opens the
+main window on it. Sections are cards (`CardBackgroundFillColorDefaultBrush`, like the Labels form),
+max 720 px wide, in this order:
+
+```
+Settings
+┌ Appearance ─────────────────────────────────────────────┐
+│ Theme   (•) Use system setting  ( ) Light  ( ) Dark       │
+└──────────────────────────────────────────────────────────┘
+┌ Search ─────────────────────────────────────────────────┐
+│ Shortcut to open search    [ Ctrl + Alt + N ]  [Change]  [Reset] │
+│ ⚠ Ctrl+Alt+K is used by another app. Choose another.    │
+└──────────────────────────────────────────────────────────┘
+┌ Startup ────────────────────────────────────────────────┐
+│ Start Folder Notes when I sign in to Windows      [ On ] │
+└──────────────────────────────────────────────────────────┘
+┌ Labels ─────────────────────────────────────────────────┐
+│ Rename, recolour and delete labels.     [Manage labels]  │
+└──────────────────────────────────────────────────────────┘
+┌ About ──────────────────────────────────────────────────┐
+│ Folder Notes 0.1.0 · Notes are stored on this PC only.   │
+│ C:\Users\…\AppData\Local\FolderNotes  [Open data folder]   │
+└──────────────────────────────────────────────────────────┘
+```
+
+- **Saving.** Every change is saved immediately (no OK/Apply) in the `settings` table (03 § Settings).
+  If saving fails, the control goes back to the stored value and a message shows under it.
+- **Theme.** System / Light / Dark (REQ-081); applies at once to every window, and at the next start
+  before any window opens.
+- **Search shortcut** (REQ-050). Shown as "Ctrl + Alt + N". **Change** puts the box in capture mode
+  ("Press the new shortcut… Esc to cancel"); the next key press with Ctrl, Alt or Win (Shift may be
+  added) plus a letter, digit, F1–F24 or Space is taken. Shift alone, a bare key, or Esc (cancel)
+  isn't. The new shortcut is registered at once: on success it's saved, the old one stops working,
+  and "Saved" shows for 2 s; if another app owns it, "<shortcut> is used by another app. Choose
+  another." shows and the current shortcut stays (registered and saved). A shortcut that another
+  app has *registered* never reaches the page (Windows delivers it to that app), so pressing it
+  while capturing does nothing; the refusal shows for shortcuts held in other ways and for
+  **Reset**. **Reset** goes back to
+  Ctrl+Alt+N with the same rules. If the stored shortcut couldn't be registered at startup, the
+  section shows "<shortcut> couldn't be registered: another app uses it. Choose another, or close
+  that app and restart Folder Notes." until a shortcut registers.
+- **Start with Windows** (REQ-080). A ToggleSwitch that shows whether the Run entry exists for this
+  exe. On writes it, off removes it. The app never adds it by itself; the installer turns it on by
+  default (T6.1, ADR-022). An entry that points at another copy of the exe counts as on, and the
+  app updates it to its own path at startup (the user opted in; the app moved or updated).
+- **Labels.** *Manage labels* opens the Labels page (REQ-012).
+- **About.** Version (`AppInfo`), "Notes are stored on this PC only." (NFR-03), the data folder path
+  (selectable) and *Open data folder* (Explorer).
+- **Later sections** come with their features: Companion panel (T3.4), Tooltip (T4.3), Reminders
+  (T5.1). No placeholders until then.
+- **UIA:** the theme group "Theme"; the shortcut text "Search shortcut, Ctrl + Alt + N"; buttons
+  "Change search shortcut", "Reset search shortcut to Ctrl + Alt + N"; the toggle "Start Folder Notes
+  when I sign in to Windows"; messages are polite live regions.
+
+**Remembered across restarts (T2.8):** the theme; the library's sort, view (list/cards) and filters
+(labels that no longer exist are dropped when they're loaded). Selection and window size aren't.
+
 #### Orphaned page (T2.7)
 
 The **Orphaned** item sits under *Labels* in the navigation rail. When there are orphaned notes it
@@ -293,7 +352,7 @@ their note: the header path and *Open folder* update without counting as an edit
 are created in code the first time they're opened (since T2.7, ADR-021; T2.6's `x:Load` never
 realized them, so opening Labels or Settings crashed). Items appear when their task
 lands: **All notes** (T2.4), **Labels** (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
-footer **Settings** (T2.8). Until T2.8 the Settings page holds only the Theme choice that the
+footer **Settings** (T2.8, § Settings page). Before T2.8 the Settings page held only the Theme choice that the
 T2.2 token sample had (System / Light / Dark, not saved across restarts). The token sample is gone.
 
 - **What's listed.** Every live note (`ListAsync`, `State = Active`), orphaned ones included; their
@@ -325,7 +384,7 @@ T2.2 token sample had (System / Light / Dark, not saved across restarts). The to
   listed.
 - **View**: *List* or *Cards* (two toggle buttons that act as one choice).
 - Sort, filters, view and selection survive closing and reopening the main window (the window is
-  reused, 02 § App shell). They aren't saved across restarts until T2.8.
+  reused, 02 § App shell). Sort, filters and view are also saved across restarts (T2.8); selection isn't.
 - **Empty states.** No notes at all: a folder glyph, "No notes yet", and "Right-click a folder in
   Explorer and choose Add folder note, or run FolderNotes --edit <folder>." Filters that match
   nothing: "No notes match these filters" and a [Clear filters] button.

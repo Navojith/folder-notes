@@ -19,17 +19,22 @@ public sealed partial class MainWindow : Window, IThemeTarget
 
     private readonly ThemeService _theme;
     private readonly ILogger _log;
-    private bool _syncingChoice;
-    private AppTheme _appTheme;
     private bool _closingForGood;
 
-    internal MainWindow(ThemeService theme, LibraryViewModel? library, Labels.LabelsViewModel? labels, Orphans.OrphansViewModel? orphans, ILogger log)
+    internal MainWindow(
+        ThemeService theme,
+        LibraryViewModel? library,
+        Labels.LabelsViewModel? labels,
+        Orphans.OrphansViewModel? orphans,
+        Settings.SettingsViewModel? settings,
+        ILogger log)
     {
         _theme = theme ?? throw new ArgumentNullException(nameof(theme));
         _log = (log ?? throw new ArgumentNullException(nameof(log))).ForContext<MainWindow>();
         LibraryViewModel = library;
         LabelsViewModel = labels;
         OrphansViewModel = orphans;
+        SettingsViewModel = settings;
         InitializeComponent();
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "FolderNotes.ico"));
         AppWindow.Resize(Scale(LogicalWidth, LogicalHeight));
@@ -44,6 +49,11 @@ public sealed partial class MainWindow : Window, IThemeTarget
         }
 
         OrphansItem.Visibility = orphans is null ? Visibility.Collapsed : Visibility.Visible;
+        SettingsItem.Visibility = settings is null ? Visibility.Collapsed : Visibility.Visible;
+        if (settings is not null)
+        {
+            settings.ManageLabelsRequested += (_, _) => Nav.SelectedItem = LabelsItem;
+        }
     }
 
     /// <summary>The user closed the window; it's hidden now.</summary>
@@ -54,6 +64,8 @@ public sealed partial class MainWindow : Window, IThemeTarget
     internal Labels.LabelsViewModel? LabelsViewModel { get; }
 
     internal Orphans.OrphansViewModel? OrphansViewModel { get; }
+
+    internal Settings.SettingsViewModel? SettingsViewModel { get; }
 
     // The navigation badge (05, Orphaned page): the count, also in the item's UIA name.
     private void OnOrphansChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -76,20 +88,6 @@ public sealed partial class MainWindow : Window, IThemeTarget
             AppTheme.Dark => TitleBarTheme.Dark,
             _ => TitleBarTheme.UseDefaultAppMode,
         };
-        _appTheme = theme;
-        SyncThemeChoice();
-    }
-
-    private void SyncThemeChoice()
-    {
-        if (SettingsPage?.ThemeChoice is not { } choice)
-        {
-            return; // the Settings page isn't created until it's first opened (EnsurePage)
-        }
-
-        _syncingChoice = true;
-        choice.SelectedIndex = (int)_appTheme;
-        _syncingChoice = false;
     }
 
     // Created on first visit (EnsurePage).
@@ -97,7 +95,7 @@ public sealed partial class MainWindow : Window, IThemeTarget
 
     private Orphans.OrphansPage? OrphansPage { get; set; }
 
-    private SettingsStubPage? SettingsPage { get; set; }
+    private Settings.SettingsPage? SettingsPage { get; set; }
 
     /// <summary>
     /// Pages other than All notes are created on first visit, to keep memory down (REQ-080). They're
@@ -117,11 +115,10 @@ public sealed partial class MainWindow : Window, IThemeTarget
             OrphansPage = AddPage(new Orphans.OrphansPage());
             OrphansPage.ViewModel = OrphansViewModel;
         }
-        else if (ReferenceEquals(page, SettingsItem) && SettingsPage is null)
+        else if (ReferenceEquals(page, SettingsItem) && SettingsPage is null && SettingsViewModel is not null)
         {
-            SettingsPage = AddPage(new SettingsStubPage());
-            SettingsPage.ThemeChoice.SelectionChanged += OnThemeChoiceChanged;
-            SyncThemeChoice();
+            SettingsPage = AddPage(new Settings.SettingsPage());
+            SettingsPage.ViewModel = SettingsViewModel;
         }
     }
 
@@ -165,6 +162,9 @@ public sealed partial class MainWindow : Window, IThemeTarget
             _log.Error(ex, "Counting the orphaned notes failed");
         }
     }
+
+    /// <summary>The tray's Settings (05 § Settings page).</summary>
+    internal void ShowSettings() => Nav.SelectedItem = SettingsItem;
 
     /// <summary>Switches to All notes (e.g. for <c>--open-note</c>).</summary>
     internal void ShowLibrary() => Nav.SelectedItem = AllNotesItem;
@@ -223,6 +223,11 @@ public sealed partial class MainWindow : Window, IThemeTarget
     {
         var page = args.SelectedItem;
         EnsurePage(page);
+        if (ReferenceEquals(page, SettingsItem))
+        {
+            SettingsViewModel?.Refresh(); // the Run entry and the hotkey can change outside the page
+        }
+
         if (SettingsPage is not null)
         {
             SettingsPage.Visibility = ReferenceEquals(page, SettingsItem) ? Visibility.Visible : Visibility.Collapsed;
@@ -289,14 +294,6 @@ public sealed partial class MainWindow : Window, IThemeTarget
         {
             _log.Error(ex, "Filtering the library by {Label} failed", labelName);
             ShowError($"Couldn't show the notes: {ex.Message}");
-        }
-    }
-
-    private void OnThemeChoiceChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_syncingChoice && sender is RadioButtons { SelectedIndex: >= 0 } choice)
-        {
-            _theme.Theme = (AppTheme)choice.SelectedIndex;
         }
     }
 

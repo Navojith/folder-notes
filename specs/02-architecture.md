@@ -222,6 +222,32 @@ Resolved in T2.1:
 - **`SearchPaletteWindow`** hosts the view; `AppShell.OpenSearch(query)` creates it once and
   re-shows it. *Open note* goes through `AppShell.OpenNote`.
 
+## Settings (T2.8)
+
+- **Store:** `ISettingsStore` (Core, implemented by `SqliteNoteStore`): `GetAllSettingsAsync()` →
+  key/value dictionary, `SetSettingAsync(key, value)` / `RemoveSettingAsync(key)` through the
+  single writer (ADR-011). Plain strings; the app owns the keys and formats (03 § Settings).
+- **`AppSettings`** (App, no XAML types): typed access with defaults and tolerant parsing (an
+  unknown or invalid value is logged and gives the default, never a startup failure). Loaded once
+  at startup after the store opens; the theme is applied and the hotkey registered from it before
+  the first window. Holds `Theme`, `SearchHotkey` (`HotkeyGesture`), and `LibraryState` (sort, view,
+  label and status filters). Writes go to the store and update the in-memory copy.
+- **`HotkeyGesture`** (App): modifiers + virtual key; `TryParse("Ctrl+Alt+N")`, `ToString()` (storage
+  form) and `DisplayText` ("Ctrl + Alt + N"), `FromKeyPress` with the 05 rules.
+- **`IHotkeyHost`**: `bool TryChange(HotkeyGesture)` (on failure the previous one is registered
+  again) and `HotkeyGesture? Registered`. `TrayIcon` implements it.
+- **`IStartupRegistration`**: `IsEnabled`, `Enable()`, `Disable()`, `RepairPath()`.
+  `RunKeyStartupRegistration` writes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, value
+  `FolderNotes` = `"<exe>" --background`; tests point it at a scratch key. A packaged build (T6.1)
+  swaps in a `StartupTask` implementation.
+- **`SettingsViewModel`** (no XAML types): theme, shortcut capture/change/reset with messages,
+  startup toggle, version and data folder; raises `ManageLabelsRequested`. Dependencies:
+  `AppSettings`, `ThemeService`, `IHotkeyHost`, `IStartupRegistration`, `TimeProvider`, `IUiDispatcher`,
+  `ILogger`.
+- **`LibraryViewModel`** takes the saved `LibraryState` at creation and reports changes through a
+  callback that `AppSettings` saves.
+- The tray menu's *Settings* calls `AppShell.ShowSettings()` (main window on the Settings page).
+
 ## Orphaned page and orphan scan (T2.7)
 
 - **`OrphanScanner`** (Core, 03 § Orphan detection): `Classify(note)` → `FolderCheck(State,

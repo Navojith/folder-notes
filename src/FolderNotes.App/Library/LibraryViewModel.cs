@@ -28,6 +28,16 @@ public enum LibraryEmptyState
     NoMatches,
 }
 
+/// <summary>What the library remembers across restarts (05 § Settings page, 03 § Settings, T2.8).</summary>
+public sealed record LibraryState(NoteSort Sort, LibraryViewMode View, IReadOnlyList<string> Labels, IReadOnlyList<NoteStatus> Statuses)
+{
+    public static LibraryState Default { get; } = new(NoteSort.UpdatedDesc, LibraryViewMode.List, [], []);
+
+    public bool Matches(LibraryState other) =>
+        other is not null && Sort == other.Sort && View == other.View
+        && Labels.SequenceEqual(other.Labels, StringComparer.Ordinal) && Statuses.SequenceEqual(other.Statuses);
+}
+
 /// <summary>An active filter, shown as a removable chip (05 § Library behaviour).</summary>
 public sealed record LibraryFilter(string? LabelName, NoteStatus? Status)
 {
@@ -57,6 +67,7 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
     private Task _labelsWork = Task.CompletedTask;
     private bool _loadedOnce;
     private bool _disposed;
+    private LibraryState _reportedState = LibraryState.Default;
 
     internal LibraryViewModel(
         INoteRepository notes,
@@ -120,6 +131,41 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
     public bool IsLabelFiltered(string name) => _labelFilters.Contains(name, Label.NameComparer);
 
     public bool IsStatusFiltered(NoteStatus status) => _statusFilters.Contains(status);
+
+    /// <summary>Sort, view and filters now (T2.8).</summary>
+    public LibraryState State => new(Sort, ViewMode, [.. _labelFilters], [.. _statusFilters]);
+
+    /// <summary>Called whenever <see cref="State"/> changes, to save it (AppSettings). UI thread.</summary>
+    internal Action<LibraryState>? StateChanged { get; set; }
+
+    /// <summary>
+    /// The saved state, before the first load. Labels that no longer exist are dropped by the first
+    /// reload (and reported back).
+    /// </summary>
+    internal void Restore(LibraryState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        Sort = state.Sort;
+        ViewMode = state.View;
+        _labelFilters.Clear();
+        _labelFilters.AddRange(state.Labels.Distinct(Label.NameComparer));
+        _statusFilters.Clear();
+        _statusFilters.AddRange(state.Statuses.Where(s => s != NoteStatus.None).Distinct());
+        SyncFilterChips();
+        _reportedState = State;
+    }
+
+    private void ReportState()
+    {
+        var now = State;
+        if (!now.Matches(_reportedState))
+        {
+            _reportedState = now;
+            StateChanged?.Invoke(now);
+        }
+    }
+
+    partial void OnViewModeChanged(LibraryViewMode value) => ReportState();
 
     // ───────────── loading ─────────────
 
@@ -210,6 +256,7 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         }
 
         Sort = sort;
+        ReportState();
         return ReloadAsync();
     }
 
@@ -290,6 +337,7 @@ public sealed partial class LibraryViewModel : ObservableObject, IDisposable
         }
 
         OnPropertyChanged(nameof(HasFilters));
+        ReportState();
     }
 
     // ───────────── selection + detail ─────────────

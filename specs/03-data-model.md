@@ -236,6 +236,21 @@ REQ-013 starter labels. Before migrating a database that has `user_version ≥ 1
 with the SQLite online-backup API to `%LOCALAPPDATA%\FolderNotes\backups\notes-v<from>-<UTC yyyyMMddHHmmss>.db`.
 A database with a *newer* version than the app knows is opened read-only and reported, never downgraded.
 
+**Settings** (T2.8, `settings` table, 02 § Settings). Keys and values (strings; invalid values are
+read as the default):
+
+| Key | Values | Default |
+|---|---|---|
+| `theme` | `system` / `light` / `dark` | `system` |
+| `search.hotkey` | `Ctrl+Alt+N` form: modifiers `Ctrl`, `Alt`, `Shift`, `Win` then one key (`A`–`Z`, `0`–`9`, `F1`–`F24`, `Space`) | `Ctrl+Alt+N` |
+| `library.sort` | `updated` / `title` / `due` / `path` | `updated` |
+| `library.view` | `list` / `cards` | `list` |
+| `library.labels` | label names, JSON array | `[]` |
+| `library.statuses` | status keys (`NoteStatus` keys), JSON array | `[]` |
+
+*Start with Windows* isn't stored here: its truth is the Run entry (ADR-022). Later features add
+their keys (panel, tooltip, reminders).
+
 **Repository rules:**
 - Upsert sets `updated_at` to now. On first insert it keeps `created_at` from the note. Import (T1.7)
   keeps both timestamps.

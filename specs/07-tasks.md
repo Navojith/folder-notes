@@ -231,7 +231,33 @@ superseded), and specs 03/04 reflect what was learned.
   code. `perf-check` passes: tray-only 34 MB; editor ≤ 68.4 MB; main window ≤ 77 MB; palette
   ≤ 78.8 MB; growth -2.5 / -1.6 / +0.5 MB; idle CPU 0 / 0.052 %. The Orphaned page adds ≈2.7 MB once
   visited (70.5 → 73.2 MB; 77.4 MB with Labels visited too).*
-- [ ] **T2.8 🧱 Settings page** (REQ-081) and start with Windows (Run key, or a StartupTask when packaged).
+- [x] **T2.8 🧱 Settings page** (REQ-080 start with Windows, REQ-081) and start with Windows (Run key,
+  or a StartupTask when packaged). See 05 § Settings page, 02 § Settings, 03 § Settings, ADR-022.
+  *Done when:* Core tests cover the settings store (round trip, overwrite, remove, survives reopen);
+  App tests cover `AppSettings` (defaults, round trip, invalid values give defaults), `HotkeyGesture`
+  (parse, format, key-press rules), `SettingsViewModel` (theme saved and applied, shortcut capture,
+  change success, refused shortcut keeps the old one, reset, startup-failure warning, startup toggle,
+  save failures revert), the library restoring its saved sort/view/filters (dropping deleted labels),
+  and `RunKeyStartupRegistration` against a scratch registry key; checked live on Release: theme and
+  library state survive a restart, a new shortcut opens the palette and the old one doesn't, a
+  shortcut held by another process is refused, the startup toggle adds and removes the Run entry
+  (the machine's original state restored afterwards), tray *Settings* and *Manage labels* navigate;
+  and `eng/perf-check.ps1` passes.
+  *Done 2026-11-01: `ISettingsStore` on `SqliteNoteStore`; App: `AppSettings` (defaults, tolerant
+  parsing, writes only what changed), `HotkeyGesture`, `IHotkeyHost` on `TrayIcon` (`TryChange` puts the
+  previous shortcut back), `RunKeyStartupRegistration` (+ path repair at startup), `SettingsViewModel`
+  and `SettingsPage` (Appearance, Search shortcut capture/Reset/warning, Startup toggle, Labels link,
+  About with the data folder) replacing the stub; the theme loads before any window; the library
+  restores and saves sort/view/filters (`LibraryState`); tray *Settings* opens the page. 35 new tests
+  (4 Core, 31 App); 718/718 green in Release. Checked live on Release: Dark theme, cards view and
+  Ctrl+Shift+F captured with real key presses survive a tray Quit + restart; the new shortcut opens
+  search and Ctrl+Alt+N doesn't; Reset refused while another process held Ctrl+Alt+N (current one
+  kept working); restarting while another process held Ctrl+Shift+F showed the warning, and Reset
+  then registered Ctrl+Alt+N and cleared it; the startup toggle wrote `"<exe>" --background` to the
+  Run key and removed it (no entry before or after); tray *Settings* and *Manage labels* navigate.
+  Found while testing: a shortcut another app has *registered* never reaches the capture box (05
+  note). `perf-check` passes: tray-only 33.9 MB; editor ≤ 68.4 MB; main ≤ 76.9 MB; palette ≤ 78.5 MB;
+  growth -0.6 / -0.4 / -0.1 MB; idle CPU 0 %. The Settings page adds ≈3.4 MB once visited.*
 - [ ] **T2.9 ✅ Accessibility pass** (REQ-083) with Accessibility Insights. No critical issues.
 
 **Exit:** a user can add, find, edit and delete notes through the app and `--edit`, and FlaUI
@@ -294,6 +320,7 @@ zero Explorer crashes.
 
 - [ ] **T6.1 🧱 Packaging:** MSIX (signed) + per-user installer (e.g. Velopack or Inno Setup),
   clean uninstall (registry, shell ext, startup entry; data kept unless the user ticks "remove my notes").
+  The installer turns *Start with Windows* on by default (REQ-080, ADR-022).
 - [ ] **T6.2 🧱 Auto-update** (handles the locked ShellExt DLL through versioned folders).
 - [ ] **T6.3 ✅ Release checklist:** manual matrix, privacy review (no network, NFR-03), README and screenshots.
 

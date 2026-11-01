@@ -325,3 +325,23 @@ them to it on first visit. Pages stay alive while the window does, as before.
 **Consequences:** Same memory profile as T2.6 intended (a page costs nothing until opened). Future
 pages follow this pattern; `x:Load` stays usable inside `UserControl`s and data templates
 (the Labels page's rename box uses it). The live check of every task that adds a page opens it.
+
+## ADR-022: Settings live in the database; "start with Windows" is the Run entry, defaulted by the installer — *accepted (T2.8, 2026-11-01)*
+
+**Context:** REQ-081 needs persistent settings; 03 already has a `settings` table. REQ-080 says the
+app starts with Windows "default on". An unpackaged app that registers itself on first run would
+also register every development and `perf-check` build folder on this machine, and a Run entry the
+user never chose is the kind of quiet machine change the principles avoid. A global hotkey can be
+taken by another app at any time.
+**Decision:** Settings are key/value strings in the `settings` table, written through the single
+writer; the app parses them with defaults (bad values never stop startup). *Start with Windows* has
+no stored value: the Run entry (`HKCU\…\Run\FolderNotes`) is the truth, the toggle reads and writes
+it, and the app never creates it on its own. The installer (T6.1) enables it by default, which is
+where "default on" is met; a packaged build uses `StartupTask`. If the entry exists but points at
+another exe path, the app rewrites it to its own path (the user already opted in). Changing the
+hotkey registers the new one first and only then saves; if it's refused, the previous one is
+registered again.
+**Consequences:** Settings are included in database backups and migrations. Before T6.1, a fresh
+install from source starts with Windows only after the user turns it on. The settings page shows
+the real registration state, including entries the user removed elsewhere (Task Manager's Startup
+tab).

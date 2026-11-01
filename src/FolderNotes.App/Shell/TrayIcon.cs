@@ -21,7 +21,7 @@ internal enum TrayCommand
 /// owns the icon, shows the menu and re-adds the icon after an Explorer restart.
 /// Must be created and disposed on the UI thread.
 /// </summary>
-internal sealed unsafe class TrayIcon : IDisposable
+internal sealed unsafe class TrayIcon : IDisposable, Services.IHotkeyHost
 {
     private const uint CallbackMessage = WM_APP + 1;
     private const uint IconId = 1;
@@ -105,6 +105,27 @@ internal sealed unsafe class TrayIcon : IDisposable
         }
 
         return _hotkeyRegistered;
+    }
+
+    /// <summary>The registered search shortcut, or null (02 § Settings).</summary>
+    public Services.HotkeyGesture? Registered { get; private set; }
+
+    /// <summary>
+    /// Registers <paramref name="gesture"/>; if another app owns it, the previous shortcut is registered
+    /// again and false is returned (05 § Settings page, ADR-022).
+    /// </summary>
+    public bool TryChange(Services.HotkeyGesture gesture)
+    {
+        ArgumentNullException.ThrowIfNull(gesture);
+        var previous = Registered;
+        if (RegisterHotkey(gesture.Modifiers, gesture.VirtualKey))
+        {
+            Registered = gesture;
+            return true;
+        }
+
+        Registered = previous is not null && RegisterHotkey(previous.Modifiers, previous.VirtualKey) ? previous : null;
+        return false;
     }
 
     /// <summary>Whether "Panel on/off" is enabled in the menu (Phase 3 turns it on).</summary>

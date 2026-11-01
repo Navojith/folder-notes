@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Settings page (specs/05 § Settings page, REQ-080/081). Created on first visit (ADR-021). -->
+<UserControl
+    x:Class="FolderNotes.App.Settings.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <UserControl.Resources>
+    <Style x:Key="SettingsCard" TargetType="Border">
+      <Setter Property="Padding" Value="16,12" />
+      <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
+      <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+    </Style>
+  </UserControl.Resources>
+
+  <ScrollViewer Padding="24,16">
+    <StackPanel Spacing="{StaticResource SpacingL}" MaxWidth="720" HorizontalAlignment="Left">
+      <TextBlock Text="Settings" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+      <!-- Appearance -->
+      <Border Style="{StaticResource SettingsCard}">
+        <StackPanel Spacing="{StaticResource SpacingS}">
+          <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" />
+          <RadioButtons x:Name="ThemeChoice" Header="Theme" MaxColumns="3" AutomationProperties.AutomationId="ThemeChoice"
+                        AutomationProperties.Name="Theme" SelectionChanged="OnThemeChanged">
+            <x:String>Use system setting</x:String>
+            <x:String>Light</x:String>
+            <x:String>Dark</x:String>
+          </RadioButtons>
+          <TextBlock x:Name="ThemeError" Visibility="Collapsed" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                     Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Search -->
+      <Border Style="{StaticResource SettingsCard}">
+        <StackPanel Spacing="{StaticResource SpacingS}">
+          <TextBlock Text="Search" Style="{StaticResource BodyStrongTextBlockStyle}" />
+          <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Shortcut to open search" VerticalAlignment="Center" />
+            <Border x:Name="HotkeyBox" Grid.Column="1" MinWidth="170" Padding="10,5" CornerRadius="4" BorderThickness="1"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" Background="{ThemeResource ControlFillColorDefaultBrush}">
+              <TextBlock x:Name="HotkeyText" AutomationProperties.AutomationId="HotkeyText" HorizontalAlignment="Center"
+                         FontFamily="Consolas" />
+            </Border>
+            <Button x:Name="ChangeButton" Grid.Column="2" Content="Change" AutomationProperties.AutomationId="ChangeHotkey"
+                    AutomationProperties.Name="Change search shortcut" Click="OnChangeHotkey" PreviewKeyDown="OnCaptureKeyDown"
+                    LostFocus="OnCaptureLostFocus" />
+            <Button x:Name="ResetButton" Grid.Column="3" Content="Reset" AutomationProperties.AutomationId="ResetHotkey"
+                    Click="OnResetHotkey" />
+          </Grid>
+          <TextBlock x:Name="HotkeyMessage" AutomationProperties.AutomationId="HotkeyMessage" Visibility="Collapsed" TextWrapping="Wrap"
+                     AutomationProperties.LiveSetting="Polite" Style="{StaticResource CaptionTextBlockStyle}" />
+          <InfoBar x:Name="HotkeyWarning" AutomationProperties.AutomationId="HotkeyWarning" Severity="Warning" IsClosable="False" IsOpen="False" />
+        </StackPanel>
+      </Border>
+
+      <!-- Startup -->
+      <Border Style="{StaticResource SettingsCard}">
+        <StackPanel Spacing="{StaticResource SpacingS}">
+          <TextBlock Text="Startup" Style="{StaticResource BodyStrongTextBlockStyle}" />
+          <ToggleSwitch x:Name="StartupToggle" Header="Start Folder Notes when I sign in to Windows" AutomationProperties.AutomationId="StartWithWindows"
+                        AutomationProperties.Name="Start Folder Notes when I sign in to Windows" Toggled="OnStartupToggled" />
+          <TextBlock x:Name="StartupError" Visibility="Collapsed" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+                     Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Labels -->
+      <Border Style="{StaticResource SettingsCard}">
+        <Grid ColumnSpacing="8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <StackPanel Spacing="{StaticResource SpacingS}">
+            <TextBlock Text="Labels" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <TextBlock Text="Rename, recolour and delete labels." Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+          </StackPanel>
+          <Button Grid.Column="1" Content="Manage labels" VerticalAlignment="Center" AutomationProperties.AutomationId="ManageLabels"
+                  Click="OnManageLabels" />
+        </Grid>
+      </Border>
+
+      <!-- About -->
+      <Border Style="{StaticResource SettingsCard}">
+        <StackPanel Spacing="{StaticResource SpacingS}">
+          <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" />
+          <TextBlock x:Name="VersionText" AutomationProperties.AutomationId="VersionText" />
+          <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="DataFolderText" IsTextSelectionEnabled="True" TextWrapping="Wrap" VerticalAlignment="Center"
+                       Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       AutomationProperties.AutomationId="DataFolder" />
+            <Button Grid.Column="1" Content="Open data folder" AutomationProperties.AutomationId="OpenDataFolder" Click="OnOpenDataFolder" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -90,6 +90,25 @@ public partial class App : Application
             _shell.StartupError = $"Couldn't open the notes database: {ex.Message}";
         }
 
+        // Settings first, so the theme applies before any window opens (05 § Settings page, ADR-022).
+        AppSettings? settings = null;
+        if (_store is not null)
+        {
+            settings = new AppSettings(_store, _log);
+            try
+            {
+                await settings.LoadAsync();
+            }
+#pragma warning disable CA1031 // Defaults are fine; the store logged the problem.
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                _log.Error(ex, "Loading the settings failed; using defaults");
+            }
+
+            theme.Theme = settings.Theme;
+        }
+
         _services = ConfigureServices(uiDispatcher, theme);
         if (_store is not null)
         {
@@ -102,7 +121,14 @@ public partial class App : Application
             var store = _store;
             var events = _services.GetRequiredService<UiNoteEvents>();
             var editors = _shell.EditorFactory!;
-            _shell.LibraryFactory = () => new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
+            var appSettings = settings!;
+            _shell.LibraryFactory = () =>
+            {
+                var library = new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
+                library.Restore(appSettings.Library);
+                library.StateChanged = state => _ = SaveLibraryStateAsync(appSettings, state);
+                return library;
+            };
             _shell.LabelsFactory = () => new Labels.LabelsViewModel(store, events, _log);
 
             // Orphan detection (03, Orphan detection): scheduled scans plus the Orphaned page.
@@ -121,8 +147,31 @@ public partial class App : Application
         var tray = _services.GetRequiredService<TrayIcon>();
         tray.CommandInvoked += (_, command) => OnTrayCommand(command);
         tray.HotkeyPressed += (_, _) => _router?.Route(new ActivationCommand.Search(string.Empty), ActivationSource.Tray);
-        // REQ-050: Ctrl+Alt+N until Settings makes it configurable (T2.8).
-        tray.RegisterHotkey(Shell.TrayNative.MOD_CONTROL | Shell.TrayNative.MOD_ALT, Shell.TrayNative.VK_N);
+        // REQ-050: the saved shortcut (Ctrl+Alt+N by default). A failure shows in Settings (05).
+        tray.TryChange(settings?.SearchHotkey ?? HotkeyGesture.Default);
+
+        var startup = new RunKeyStartupRegistration(Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "FolderNotes.exe"));
+        try
+        {
+            if (startup.RepairPath())
+            {
+                _log.Information("Start with Windows pointed at another copy; updated it to this exe (ADR-022)");
+            }
+        }
+#pragma warning disable CA1031 // Not worth failing startup over.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Warning(ex, "Checking the start-with-Windows entry failed");
+        }
+
+        if (settings is not null)
+        {
+            var appSettings2 = settings;
+            _shell.SettingsFactory = () => new Settings.SettingsViewModel(
+                appSettings2, t => theme.Theme = t, tray, startup, TimeProvider.System, uiDispatcher, _log,
+                typeof(App).Assembly.GetName().Version?.ToString(3) ?? "?", AppInfo.DataDirectory);
+        }
 
         // Our own args first, then anything a second launch forwarded meanwhile.
         _router.Route(_store is null ? new ActivationCommand.ShowMain() : ActivationParser.Parse(_args), ActivationSource.Startup);
@@ -160,6 +209,20 @@ public partial class App : Application
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 
+    private async Task SaveLibraryStateAsync(AppSettings settings, Library.LibraryState state)
+    {
+        try
+        {
+            await settings.SetLibraryAsync(state);
+        }
+#pragma warning disable CA1031 // Losing a sort choice isn't worth an error dialog; logged.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Saving the library view state failed");
+        }
+    }
+
     private void OnTrayCommand(TrayCommand command)
     {
         switch (command)
@@ -171,8 +234,7 @@ public partial class App : Application
                 _router?.Route(new ActivationCommand.Search(string.Empty), ActivationSource.Tray);
                 break;
             case TrayCommand.Settings:
-                // T2.8 adds the Settings page.
-                _router?.Route(new ActivationCommand.ShowMain(), ActivationSource.Tray);
+                _shell?.ShowSettings();
                 break;
             case TrayCommand.TogglePanel:
                 break; // Phase 3.

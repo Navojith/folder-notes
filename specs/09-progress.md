@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.8 Settings page
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.9 Accessibility pass
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 7 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 8 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -44,7 +44,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.5 Labels manager | ✅ | 2026-11-01 | `a5a4487` | ADR-018; REQ-012 "Settings → Labels" resolved as its own page; live UIA check + `perf-check` |
 | T2.6 Search palette + global hotkey | ✅ | 2026-11-01 | `5a26e3f` | ADR-019; "windows used" budget 90 → 100 MB (user, ADR-016 amendment); live UIA check with the real hotkey |
 | T2.7 Orphaned view + relink | ✅ | 2026-11-01 | `1665fe1` | ADR-020 (integrity rules), ADR-021 (pages built in code; fixes a T2.6 crash); live UIA check with the real folder picker + `perf-check` |
-| T2.8 Settings page | ⚪ next | | | |
+| T2.8 Settings page | ✅ | 2026-11-01 | (this commit) | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
+| T2.9 Accessibility pass | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -83,6 +84,8 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | NFR-06 growth, 8 palette cycles (re-run) | ≤4 MB | +0.5 MB; open readings flat at 77–79 MB. The T2.6 +3.3 MB didn't reproduce | `perf-check` T2.7 | ✅ (still watched) |
 | REQ-080 all windows used (re-run) | <100 MB | max 78.8 MB open, 78.5 MB closed (≈98 MB private bytes); tray-only 34 MB; editor ≤ 68.4 MB; main ≤ 77 MB. About 15 MB under T2.6's 94.2 MB; not investigated (no change aimed at memory), so treat it as run-to-run variation until O-16 re-baselines | `perf-check` T2.7 | ✅ |
 | REQ-080 main window, Orphaned page visited | <100 MB | 73.2 MB vs 70.5 MB on All notes only (+2.7 MB once); 77.4 MB with Labels visited too | T2.7 (manual) | ✅ |
+| REQ-080 main window, Settings page visited | <100 MB | 74.7 MB vs 71.3 MB on All notes only (+3.4 MB once) | T2.8 (manual) | ✅ |
+| NFR-06 growth, 8 palette cycles (T2.8 run) | ≤4 MB | -0.1 MB; open readings flat at 77–78.5 MB | `perf-check` T2.8 | ✅ (+3.3 MB of T2.6 not seen again in two runs) |
 | Orphan scan cost | (no target) | 5 notes in 21 ms (startup scan, Release); 10k-note cost measured at T5.5 (ADR-020) | T2.7 | ✅ |
 | REQ-080 main window, Labels page visited | <90 MB | 81.8 MB open (102 MB private bytes) vs 77.5 MB on All notes only; 79.2 MB after close | T2.5 (manual) | ✅ (about 8 MB headroom) |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
@@ -112,6 +115,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 | O-19 | Orphan scan reads full notes (`ListAsync`) to classify them; measure at 10k notes and switch to a binding-only query if it costs (memory or time) | ADR-020 | T5.5 | open |
+| O-21 | JSON export/import (REQ-070, Core done in T1.7) has no UI and no task; Settings would be the natural home | 07 | user's call (T2.9 or Phase 5) | open |
 | O-20 | Relinking many notes after a parent folder moved to another drive is one *Relink…* per note; a "relink the others under the same parent" helper could come later (not in v1 scope) | 05 § Orphaned page | post-v1 / user's call | open |
 
 ## Blockers
@@ -137,6 +141,28 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.8)
+- **T2.8 done:** the **Settings** page: theme, the search shortcut (capture with real keys, Reset,
+  a warning when the saved one couldn't be registered), *Start with Windows*, a link to Labels, and
+  About (version, data folder). The theme and the library's sort/view/filters now survive restarts;
+  tray *Settings* opens the page. 718/718 tests green in Release (Core 392 → 396, App 291 → 322).
+- **Spec changes made first:** REQ-081 now says which task brings each setting (panel T3.4, tooltip
+  T4.3, reminders T5.1; no placeholder switches), acceptance criteria (01), 05 § Settings page, 02 §
+  Settings, 03 § Settings keys, the T2.8 *Done when*, T6.1 now owns "default on", ADR-022.
+- **Decision to confirm (ADR-022):** REQ-080 says start with Windows is "default on". The app never
+  writes the Run entry by itself (it would register every dev and `perf-check` build); the toggle
+  reads and writes the real entry, and the installer (T6.1) turns it on by default. Easy to change
+  if the user prefers first-run registration.
+- **Found live:** a shortcut another app has registered never reaches the capture box (Windows
+  sends it to that app), so the "used by another app" refusal appears through Reset and at startup
+  rather than while capturing; noted in 05. Also: PowerShell turns `$null` into `""` for string
+  P/Invoke arguments (UIA helper only).
+- **Live-check state:** the dev database was backed up and restored (byte-identical); the Run key
+  had no FolderNotes entry before and has none after; the helper processes that held hotkeys were
+  stopped; the scratch registry key used by tests is removed by the tests.
+- **Next:** T2.9 accessibility pass (O-14 high-contrast check is part of it). O-21 (export/import
+  has no UI) is the user's call.
 
 ### 2026-11-01 (T2.7)
 - **T2.7 done:** the **Orphaned** page (reasons, *Check again*, *Relink…* through the system folder

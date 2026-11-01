@@ -280,6 +280,35 @@ public sealed class LibraryViewModelTests : IAsyncLifetime
     // ───────────── selection + detail ─────────────
 
     [Fact(Timeout = 20_000)]
+    public async Task REQ081_SavedState_IsRestored_DeletedLabelsDropped_AndChangesReported()
+    {
+        await AddAsync(@"D:\A", "A", n => n with { Labels = [Label.Create("client", "blue")], Status = NoteStatus.Keep });
+        await AddAsync(@"D:\B", "B", n => n with { Labels = [Label.Create("client", "blue")], Status = NoteStatus.Review });
+        await AddAsync(@"D:\C", "C");
+        var reported = new List<LibraryState>();
+        using var vm = NewVm();
+        vm.Restore(new LibraryState(NoteSort.Title, LibraryViewMode.Cards, ["client", "gone-label"], [NoteStatus.Keep, NoteStatus.Review]));
+        vm.StateChanged = reported.Add;
+
+        await vm.ActivateAsync();
+
+        vm.Sort.ShouldBe(NoteSort.Title);
+        vm.ViewMode.ShouldBe(LibraryViewMode.Cards);
+        Titles(vm).ShouldBe(["A", "B"]);
+        vm.LabelFilters.ShouldBe(["client"]);
+        reported.Single().Labels.ShouldBe(["client"]); // the dropped label is saved away
+
+        await vm.SetSortAsync(NoteSort.Path);
+        vm.ViewMode = LibraryViewMode.List;
+        await vm.ClearFiltersAsync();
+        reported.Count.ShouldBe(4);
+        reported[^1].Matches(new LibraryState(NoteSort.Path, LibraryViewMode.List, [], [])).ShouldBeTrue();
+
+        vm.ViewMode = LibraryViewMode.List; // no change, no report
+        reported.Count.ShouldBe(4);
+    }
+
+    [Fact(Timeout = 20_000)]
     public async Task ADR020_Relink_TheDetailEditorShowsTheNewFolder()
     {
         var a = await AddAsync(@"D:\A", "A");
