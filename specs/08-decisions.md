@@ -184,7 +184,34 @@ change); hide one window and reuse it.
 next `NoteEditorViewModel` to it (02 § Editor). Only extra concurrent editors are destroyed.
 **Consequences:** Memory is flat over repeated use (≈65 MB private working set / ≈83 MB private
 bytes after 8 cycles, ±2 MB). The first editor's one-time cost (≈33 MB over tray-only) stays for
-the process lifetime, which is the REQ-080 gap recorded as O-15. A reused window must reset
+the process lifetime, which is the REQ-080 gap recorded as O-15 (resolved by ADR-016). A reused window must reset
 per-session UI state (`NoteEditorView.ResetForNewSession`). The main window (T2.4) should get the
 same treatment once it holds the library.
 
+## ADR-016: Memory budgets per app state; no working-set trimming, no separate UI process — *accepted (2026-11-01)*
+
+**Context:** REQ-080 said "under 60 MB idle", measured both tray-only and after a window was used.
+After T2.3 the tray-only state is ≈32 MB, but once any WinUI window has been used the process sits
+at ≈65 MB private working set (≈83 MB private bytes) for its lifetime: the one-time cost of
+loading WinUI's controls (ADR-015, O-15). Folder Notes is meant to run all day next to Explorer,
+and from Phase 3 the companion panel keeps a window loaded whenever Explorer is in use, so
+"tray-only with every window closed" will be the uncommon state.
+**Options:** (1) trim the working set when idle: Task Manager shows ≈3 MB, but commit stays at
+83 MB, reopening takes page faults, and it only improves the reading; (2) set budgets per app
+state; (3) host windows in a child process that exits on close: frees the memory, but adds
+≈0.5–0.9 s to every open, needs IPC, breaks the single writer (ADR-011), and stops helping once
+the panel is always loaded.
+**Decision:** Option 2, chosen by the user. REQ-080 now has a budget per state, in private working
+set: tray-only < 50 MB, editor open or windows used < 90 MB, panel active < 110 MB. These are
+initial engineering targets and get re-baselined after Phase 3 (O-16). Alongside them, NFR-06
+covers what matters for an all-day companion: idle CPU, no growth across open/close cycles and
+extended sessions, and Explorer staying responsive. `eng/perf-check.ps1` measures all of it and is
+run as a regression check (06 § Resource budgets).
+**Not allowed:** working-set trimming (`EmptyWorkingSet`, `SetProcessWorkingSetSize`) and a
+separate UI process. The app stays one process with one database writer (ADR-011). `IdleTrim`'s
+compacting GC stays, because it releases real managed memory.
+**Consequences:** Budgets are honest (what Task Manager shows is what the app uses) and need no
+runtime code. A looser target can creep, so the check also fails on growth (≤ 4 MB over 8 cycles,
+≤ 8 MB over the 120-cycle soak) and is run before ticking any task that adds a window. First run
+(Release, 2026-11-01): tray-only 32.2 MB; editor open ≤ 66.6 MB; after close ≤ 67.1 MB; growth
+0.4 MB; idle CPU 0 % tray-only and 0.05 % after use. All pass.

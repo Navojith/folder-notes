@@ -128,7 +128,7 @@ hides the badge (REQ-022).
 
 | ID | Pri | Requirement |
 |---|---|---|
-| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and uses under 60 MB RAM while idle. *RAM = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction, both tray-only and after the main window was opened and closed.* |
+| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and stays within these memory budgets: **tray-only < 50 MB**; **editor open, or any window used and closed again, < 90 MB**; **Explorer companion panel active < 110 MB**. *Memory = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction. Private bytes are recorded next to it but have no budget. These are initial engineering targets, re-baselined after Phase 3 (ADR-016, O-16). Checked by `eng/perf-check.ps1` (06 § Resource budgets).* |
 | REQ-081 | M | Settings: panel on/off/position/width, hide-when-empty, tooltip on/off, hotkey, start with Windows, theme (system/light/dark), reminder time of day. |
 | REQ-082 | M | The UI shall follow the system theme and accent color and use Mica/Acrylic backdrops where available. |
 | REQ-083 | M | All UI shall be keyboard-navigable and screen-reader labelled (UIA names), with WCAG AA contrast. |
@@ -143,3 +143,4 @@ hides the badge (REQ-022).
 | NFR-03 | All data lives in `%LOCALAPPDATA%\FolderNotes\`. No network access at all in v1. |
 | NFR-04 | Per-user install, no admin rights required. |
 | NFR-05 | Scales to 10,000 notes without degrading REQ-031/041/051 targets. |
+| NFR-06 | Stable, quiet resource use for all-day running (ADR-016): idle CPU under **0.1 % of one core**, both tray-only and after windows were used, and with Explorer open but not navigating (from Phase 3). Private bytes grow by **≤ 4 MB over 8 editor open/close cycles** and **≤ 8 MB over an extended session** (the 120-cycle soak in 06). While the app runs, Explorer navigation stays responsive: the tracker costs < 10 ms per evaluation and REQ-031 (150 ms), REQ-041 (tooltip) and REQ-051 (search) keep their targets. |

@@ -158,8 +158,10 @@ smoke tests pass.
   DPI, snap and maximize handling.
 - [ ] **T3.4 🧱 Companion panel UI** (REQ-032, 035, 036, 037): states, inline edit, pin,
   collapse tab, inherited context.
-- [ ] **T3.5 ✅ Panel latency + stability tests** (REQ-031, NFR-02): automated Explorer navigation
-  tests and the manual checklist on 3 OS builds.
+- [ ] **T3.5 ✅ Panel latency + stability tests** (REQ-031, NFR-02, NFR-06): automated Explorer navigation
+  tests and the manual checklist on 3 OS builds. Add the panel-active and Explorer-navigation
+  stages to `eng/perf-check.ps1` (06 § Resource budgets), then **re-baseline the REQ-080 budgets**
+  with the panel and Acrylic in place (O-16, ADR-016).
 
 **Exit (= MVP):** right-click → add note → the panel shows it when the folder is opened, and
 search finds it.
@@ -191,7 +193,8 @@ zero Explorer crashes.
 - [ ] **T5.2 🧱 Sidecar sync** (REQ-071, 072): write, read, conflict dialog.
 - [ ] **T5.3 🧱 Daily DB backup** (REQ-084).
 - [ ] **T5.4 🧱 Markdown preview polish + checkboxes toggle from the panel** (REQ-007).
-- [ ] **T5.5 ✅ Performance pass** at 10k notes (NFR-02, NFR-05).
+- [ ] **T5.5 ✅ Performance pass** at 10k notes (NFR-02, NFR-05), plus the 120-cycle soak of
+  `eng/perf-check.ps1` (REQ-080, NFR-06).
 
 ---
 

@@ -15,6 +15,31 @@ requirement ID, e.g. `REQ060_Rename_KeepsNoteAttached`.
 | Shell extension | GoogleTest on the DLL's pure functions (path normalize, tooltip formatting, query) + a harness that `CoCreateInstance`s the handler out of Explorer and measures `GetInfoTip` latency | REQ-040/041/042 |
 | UI smoke | FlaUI | add note via `--edit`, search & open, panel shows note |
 | Performance | BenchmarkDotNet + a seeded DB of 10k notes | REQ-041 (<20 ms), REQ-051 (<100 ms), NFR-05 |
+| Resources | `eng/perf-check.ps1` against a Release build (below) | REQ-080 budgets, NFR-06 stability and idle CPU |
+
+## Resource budgets (REQ-080, NFR-06)
+
+`eng/perf-check.ps1` is the repeatable regression check (ADR-016). It starts a fresh tray process
+and records **private working set and private bytes separately** at each stage:
+
+| Stage | Measured | Budget |
+|---|---|---|
+| Tray-only, 12 s after start | working set, private bytes, idle CPU over 60 s | WS < 50 MB, CPU < 0.1 % |
+| Editor open (each of 8 cycles, 2 s after it appears) | working set, private bytes, time to window | WS < 90 MB |
+| Editor closed (each cycle, 10 s after close) | working set, private bytes | WS < 90 MB |
+| Across cycles | private bytes after close, cycle 2 → last | growth ≤ 4 MB (8 cycles), ≤ 8 MB (soak) |
+| After use | idle CPU over 60 s | < 0.1 % |
+| Panel active *(added in T3.5)* | working set, private bytes with Explorer open on a noted folder | WS < 110 MB |
+| Explorer navigation *(added in T3.5)* | CPU and tracker cost during scripted navigation; REQ-031 latency; idle CPU with Explorer open | < 10 ms per evaluation, ≤ 150 ms, < 0.1 % |
+
+- The editor is opened with `--edit` on an empty scratch folder and closed without typing, so the
+  check leaves nothing in the notes database (drafts are only saved on the first edit, ADR-014).
+- **When to run:** before ticking any task that adds or changes a window or a long-lived service
+  (record the numbers in 09), at T3.5 (with the panel stages), and at T5.5 / T6.3.
+- **Extended session (soak):** `-Cycles 120 -GrowthBudgetMB 8` (about 30 minutes), at T5.5 and
+  before each release.
+- Not allowed as a way to meet a budget: working-set trimming (`EmptyWorkingSet`,
+  `SetProcessWorkingSetSize`) or moving UI into another process (ADR-016).
 
 ## Shared test vectors
 

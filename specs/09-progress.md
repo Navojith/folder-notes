@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-10-31 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.4 Library view (after the O-15 decision)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.4 Library view
 
 ---
 
@@ -40,7 +40,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.1 WinUI 3 app skeleton | ✅ | 2026-10-31 | `38116ec` | App.Tests (47); ADR-012 tray; O-11 closed by `UiNoteEvents` |
 | T2.2 Theme + design tokens | ✅ | 2026-10-31 | `7e3c22f` | ADR-013; 12 colours AA-checked by test; real icon; HC visual check → O-14 |
 | T2.3 Note editor + compact window | ✅ | 2026-10-31 | `bdcdb4b` | ADR-014/015; e2e via UIA on Release; REQ-080 gap → O-15 |
-| T2.4 Library view | ⚪ next | | | Waits on the O-15 decision; the main window needs ADR-015-style reuse |
+| T2.4 Library view | ⚪ next | | | The main window needs ADR-015-style reuse; run `eng/perf-check.ps1` before ticking |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -57,11 +57,18 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | Upsert at 10k notes | (no target) | 10k upserts in one transaction ≈ 4 s (≈0.4 ms each) | T1.6 | ✅ |
 | REQ-060 `Resolve` cost | <5 ms (test bound) | passes; S4 measured 0.01 ms for the ID read | T1.4 | ✅ |
 | Phase 1 exit: Core coverage | ≥85% | 93.0% line / 86.6% branch (362 tests) | Phase 1 | ✅ |
-| REQ-080 idle RAM (private working set) | <60 MB | 31.7 MB tray-only; 54.2 MB after the main window was opened and closed (private bytes 46.8 / 70.7 MB), Release | T2.1 | ✅ |
+| REQ-080 idle RAM (private working set) | <60 MB (old target) | 31.7 MB tray-only; 54.2 MB after the main window was opened and closed (private bytes 46.8 / 70.7 MB), Release | T2.1 | ✅ |
 | Redirected second launch | (no target) | process exits ≈120 ms after start | T2.1 | ✅ |
 | REQ-005 autosave on kill | lose ≤500 ms | body typed 850 ms before kill kept; title typed 50 ms before kill lost | T2.3 | ✅ |
-| REQ-080 idle RAM after using the editor | <60 MB | 65 MB private working set (83 MB private bytes), flat over 8 open/close cycles after ADR-015; was +4 MB per cycle before | T2.3 | ❌ O-15 |
-| REQ-080 idle RAM after main window (token sample) | <60 MB | 60–68 MB, levels off by cycle 4 | T2.3 | ❌ O-15 |
+| REQ-080 idle RAM after using the editor | <60 MB (old target) | 65 MB private working set (83 MB private bytes), flat over 8 open/close cycles after ADR-015; was +4 MB per cycle before | T2.3 | superseded by ADR-016 budgets |
+| REQ-080 idle RAM after main window (token sample) | <60 MB (old target) | 60–68 MB, levels off by cycle 4 | T2.3 | superseded by ADR-016 budgets |
+| REQ-080 tray-only (private working set) | <50 MB | 32.2 MB (47.3 MB private bytes) | `perf-check` 2026-11-01 | ✅ |
+| REQ-080 editor open | <90 MB | max 66.6 MB (83.6 MB private bytes) over 8 cycles; window in 110–230 ms when reused, 501 ms first time | `perf-check` 2026-11-01 | ✅ |
+| REQ-080 after the editor closed | <90 MB | max 67.1 MB (83.9 MB private bytes) | `perf-check` 2026-11-01 | ✅ |
+| REQ-080 panel active | <110 MB | not built yet | T3.5 | ⚪ |
+| NFR-06 growth over 8 cycles (private bytes) | ≤4 MB | +0.4 MB, cycle 2 → 8 | `perf-check` 2026-11-01 | ✅ |
+| NFR-06 idle CPU | <0.1 % of one core | 0 % tray-only; 0.052 % after use (60 s windows) | `perf-check` 2026-11-01 | ✅ |
+| NFR-06 soak (120 cycles) | ≤8 MB growth | not run yet | T5.5 | ⚪ |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
 ## Open items to verify
@@ -81,9 +88,11 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-10 | Run BenchmarkDotNet on Release (06 § Performance); T1.6 used an xunit timing test instead | 06 | T5.5 | open |
 | O-11 | `NoteChanged` handlers run on the writer task (ADR-011); the app must marshal them to the UI thread | 02 / ADR-011 | T2.1 | **closed** 2026-10-31: `UiNoteEvents` relays via `IUiDispatcher`; UI code subscribes there (02 § App shell) |
 | O-12 | Tray icon comes back after an Explorer restart (`TaskbarCreated`), and has the right size at 150% / mixed DPI | 02 § App shell / ADR-012 | T3.5 manual | open: code path written, not exercised (didn't restart the user's Explorer) |
-| O-13 | Memory after the window closes stays ~23 MB above tray-only (XAML stays loaded). Under target now; recheck once real pages exist | REQ-080 | T5.5 | open |
+| O-13 | Memory after the window closes stays ~23 MB above tray-only (XAML stays loaded). Under target now; recheck once real pages exist | REQ-080 | T5.5 | **closed** 2026-11-01: expected and now budgeted (ADR-016, "windows used < 90 MB"); `perf-check` watches it |
 | O-14 | High-contrast look of chips, pills and windows (tokens map to system colours; tests check the file, but nobody has seen it on screen) and a live HC toggle re-rendering open chips | 05 § Design tokens | T2.9 manual | open: switching HC changes the user's whole desktop theme, so T2.2 didn't do it |
-| O-15 | REQ-080 is over target once a window has been used: ≈65 MB private working set (≈83 MB private bytes) vs <60 MB, the one-time cost of loading WinUI's controls. An idle `EmptyWorkingSet` would show 2.7 MB in Task Manager, but commit stays at 83 MB. Options: trim the working set when idle, change the target or metric, or host windows in a child process | REQ-080 / ADR-015 | before T2.4 | **open: needs a decision from the user** |
+| O-15 | REQ-080 is over target once a window has been used: ≈65 MB private working set (≈83 MB private bytes) vs <60 MB, the one-time cost of loading WinUI's controls. An idle `EmptyWorkingSet` would show 2.7 MB in Task Manager, but commit stays at 83 MB. Options: trim the working set when idle, change the target or metric, or host windows in a child process | REQ-080 / ADR-015 | before T2.4 | **closed** 2026-11-01: the user chose per-state budgets (ADR-016); no trimming, no UI process |
+| O-16 | Re-baseline the REQ-080 budgets (50 / 90 / 110 MB) once the companion panel and Acrylic exist, and add the panel and Explorer-navigation stages to `perf-check` | REQ-080 / NFR-06 / ADR-016 | T3.5 | open |
+| O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | open |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
 ## Blockers
@@ -109,6 +118,20 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (O-15 decision)
+- **Decided (user):** REQ-080 gets per-state budgets instead of one "< 60 MB idle": tray-only
+  < 50 MB, editor open or windows used < 90 MB, panel active < 110 MB, all in private working set,
+  with private bytes recorded next to them. These are initial targets, re-baselined after Phase 3
+  (O-16). No working-set trimming and no separate UI process; still one process with one writer
+  (ADR-011). Recorded as ADR-016. New NFR-06 covers idle CPU, growth over cycles and extended
+  sessions, and Explorer responsiveness. O-15 and O-13 closed.
+- **New:** `eng/perf-check.ps1`, the repeatable resource check (06 § Resource budgets). First run on
+  Release passes every check (see measurements). T3.5 adds the panel and navigation stages; T5.5
+  runs the 120-cycle soak.
+- **Found:** `--edit` on a missing folder opens a new window each time (O-17). A scratch folder
+  under `%TEMP%` got cleaned up mid-run here, so the check uses `C:\Temp\FolderNotesPerf`.
+- **Next:** T2.4 library view.
 
 ### 2026-10-31 (T2.3)
 - **T2.3 done:** a compact editor window for `--edit` and `--open-note`. `NoteEditorViewModel`
