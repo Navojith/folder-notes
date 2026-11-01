@@ -482,3 +482,9 @@ T2.2 token sample had (System / Light / Dark, not saved across restarts). The to
 - Full keyboard path: Tab order follows visual order, the panel is reachable with a hotkey
   (`Ctrl+Alt+P` focuses the panel), and the date pickers can be used with the keyboard.
 - Colour is never the only signal: status always has an icon and text, and labels always have text.
+- **Checked in CI (T2.9):** `UiaNamesTests` parses every XAML file and fails when a button, text box, list,
+  picker, toggle, nav item or menu item has no name source (`AutomationProperties.Name`, `Header`,
+  `Content`/`Label`/`Text`, or a text child). Icon-only controls therefore must set a name.
+  Names that depend on data (row actions, the hotkey box, the colour button) are set in bindings or code.
+- **Still manual:** Accessibility Insights (FastPass + Tab-stops), a screen-reader pass, and the
+  high-contrast look (O-14). They need a person at the machine.

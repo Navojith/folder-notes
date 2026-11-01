@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.6 Search palette + global hotkey | ✅ | 2026-11-01 | `5a26e3f` | ADR-019; "windows used" budget 90 → 100 MB (user, ADR-016 amendment); live UIA check with the real hotkey |
 | T2.7 Orphaned view + relink | ✅ | 2026-11-01 | `1665fe1` | ADR-020 (integrity rules), ADR-021 (pages built in code; fixes a T2.6 crash); live UIA check with the real folder picker + `perf-check` |
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
-| T2.9 Accessibility pass | ⚪ next | | | |
+| T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -141,6 +141,13 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.9, partial)
+- **Done:** `UiaNamesTests` checks every interactive XAML element has a name; it found one gap (the
+  new-label colour button had a name only after code ran) and that is fixed. 05 § Accessibility updated first.
+  324/324 App tests green in Release.
+- **Not done (needs a person):** Accessibility Insights isn't installed here, so the "no critical
+  issues" criterion, the Tab-order walk, a screen reader pass and the HC look (O-14) are open. T2.9 stays unticked.
 
 ### 2026-11-01 (T2.8)
 - **T2.8 done:** the **Settings** page: theme, the search shortcut (capture with real keys, Reset,
