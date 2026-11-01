@@ -267,7 +267,7 @@ smoke tests pass.
 
 ## Phase 3: Explorer: context menu + companion panel (MVP complete)
 
-- [ ] **T3.1 🧱 Tier-1 context menu verbs** (REQ-003, 004, ADR-024). Registered by the installer
+- [x] **T3.1 🧱 Tier-1 context menu verbs** (REQ-003, 004, ADR-024). Registered by the installer
   (`--register-shell`) and removed on uninstall (`--unregister-shell`); the user can turn them on or off,
   and repair a stale registration, in Settings. **Never automatic** (not on first run, not in dev, test or
   `perf-check` builds). See 04 § 4.1, 02 § Explorer context-menu verbs.

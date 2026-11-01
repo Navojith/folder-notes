@@ -371,8 +371,8 @@ used by tests or `perf-check`. The installer (T6.1) registers them on install an
 (through `FolderNotes.exe --unregister-shell` or its own steps). The user can turn them on or off in Settings
 (*Folder note in the right-click menu*). `ShellVerbRegistrar` reports the **actual** state from the registry:
 *Off* (no keys), *On* (both keys, commands match this exe), *Stale* (a key exists whose command points to another
-or a missing exe, or only one of the two keys exists). Settings shows Stale as "Registered for a different copy
-of Folder Notes" with **Repair** (rewrite for this exe) and the toggle off to remove. A failed write is reported
+or a missing exe, or only one of the two keys exists). Settings shows Stale as "Incomplete, or registered for a different
+copy of Folder Notes (<path>)" with **Repair** (rewrite for this exe) and the toggle off to remove. A failed write is reported
 and the state re-read, never assumed. The app never repairs on its own and only touches the `FolderNotes` key
 under the two `shell` parents.
 **Consequences:** A fresh install from source has no menu entry until the user turns it on; the installer meets

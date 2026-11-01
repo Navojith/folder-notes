@@ -275,7 +275,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
     public string ShellVerbText => ShellVerbState switch
     {
         ShellVerbState.On => "Right-click a folder, then Folder note… (on Windows 11: Show more options first).",
-        ShellVerbState.Stale => "Registered for a different copy of Folder Notes (" + (SafeRegisteredExe() ?? "unknown") + "), or incomplete.",
+        ShellVerbState.Stale => "Incomplete, or registered for a different copy of Folder Notes (" + (SafeRegisteredExe() ?? "unknown") + ").",
         _ => "Not in the right-click menu.",
     };
 

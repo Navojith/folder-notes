@@ -277,8 +277,8 @@ Settings
   app updates it to its own path at startup (the user opted in; the app moved or updated).
 - **Explorer menu (T3.1, ADR-024).** A card *Explorer* with a ToggleSwitch "Folder note in the right-click
   menu" (on = the verbs for this exe exist). Under it a line of text for the state: Off: "Not in the right-click
-  menu." On: "Right-click a folder, then Folder note… (on Windows 11: Show more options first)." Stale: "Registered
-  for a different copy of Folder Notes (<path>), or incomplete." with a **Repair** button that registers this exe. The
+  menu." On: "Right-click a folder, then Folder note… (on Windows 11: Show more options first)." Stale: "Incomplete,
+  or registered for a different copy of Folder Notes (<path>)." with a **Repair** button that registers this exe. The
   state is read from the registry each time the page is shown, never remembered. A failed change shows
   "Couldn't change this: <reason>" under the toggle, which goes back to the real state. The app never turns this on by itself.
 - **Labels.** *Manage labels* opens the Labels page (REQ-012).

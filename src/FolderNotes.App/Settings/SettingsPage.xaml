@@ -83,7 +83,7 @@
                      Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
           <Button x:Name="ShellVerbRepair" Content="Repair" AutomationProperties.AutomationId="RepairShellVerbs"
                   AutomationProperties.Name="Repair right-click menu" Visibility="Collapsed" Click="OnRepairShellVerbs" />
-          <TextBlock x:Name="ShellVerbError" Visibility="Collapsed" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
+          <TextBlock x:Name="ShellVerbError" AutomationProperties.AutomationId="ShellVerbError" Visibility="Collapsed" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"
                      Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
         </StackPanel>
       </Border>

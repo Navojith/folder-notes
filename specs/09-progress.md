@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** finish T3.1 (live Settings card + real right-click), then T3.2 (T2.9 partial, see O-22)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2 ExplorerTracker (T2.9 partial, see O-22)
 
 ---
 
@@ -15,7 +15,7 @@ session (see `CLAUDE.md`, workflow step 7).
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
 | 2 | App shell, editor, search | 🟡 In progress | 8 / 9 | — |
-| 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
+| 3 | Context menu + companion panel (**MVP**) | 🟡 In progress | 1 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 7 | — |
 | 6 | Ship | ⚪ Not started | 0 / 3 | — |
@@ -47,7 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
-| T3.1 Context menu verbs | 🟡 code + tests done | 2026-11-01 | | ADR-024: installer-only registration (`--register-shell` / `--unregister-shell`), manual toggle + Repair in Settings, never automatic. Real-HKCU registry check passed and left the registry as found. **Open:** Settings card seen on screen and a real right-click; task stays unticked |
+| T3.1 Context menu verbs | ✅ | 2026-11-01 | `2772509` + this commit | ADR-024: installer-only registration, manual toggle + Repair in Settings, never automatic. Both live checks passed: Settings card by UIA (Off/On/Stale/Repair/forced failure) and the real Explorer menu (folder and background verbs, special-character path, unregister removes both) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -144,6 +144,13 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T3.1 live checks, done)
+- **Settings card (UIA, real HKCU, Release build):** Off shows "Not in the right-click menu."; toggling On writes both keys; changing both commands to another exe path and revisiting the page shows Stale with the old path and a Repair button, and Repair restores On; deleting one key shows Stale again and Repair fixes it; with Delete denied on a `command` key, switching Off shows "Couldn't change this: Attempted to perform an unauthorized operation.", the toggle stays On and the registry is unchanged; after the ACL is removed, Off works and the error clears. Registry left with no keys.
+- **Real Explorer menu (Windows 11 → Show more options):** "Folder note…" appears for a selected folder and for empty space inside a folder. Invoking it started the app with the right folder: `C:\Temp\FolderNotesE2E\T31\My Folder & Co (…) #1 [x]` (spaces, `&`, parentheses, `#`, brackets, non-ASCII letters) in the editor's path line and title box; the empty-space verb opened `C:\Temp\FolderNotesE2E\T31`. After `--unregister-shell`, neither menu has the entry.
+- **Limits:** UIA can't see classic menu items, so the menu was checked from screenshots and driven with keys. The invoke step used arrow keys; one earlier attempt pressed F, which is the accelerator of Explorer's own "Customize this folder…", and that made Explorer write a `desktop.ini` into my scratch folder (not the app; the scratch folder is deleted). Windows 10 (O-6) isn't checked.
+- **Cleanup:** no FolderNotes process, no registry keys, dev database byte-identical to its backup, scratch folder removed. Stale text reworded to "Incomplete, or registered for a different copy…" because a missing key shows the same exe path.
+- **Next:** T3.2 ExplorerTracker.
 
 ### 2026-11-01 (T3.1 + O-21 decisions)
 - **Specs first:** ADR-023 (import is preview-then-apply, snapshot, format stays v1), ADR-024 (verbs are registered by the installer only); 01 AC and 03 § Import with preview and snapshot (with the manual restore steps); T5.6/T5.7 in 07; 04 § 4.1, 02 § Explorer context-menu verbs, 05 § Settings page.
