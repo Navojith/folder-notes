@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.6 Search palette + global hotkey
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T2.7 Orphaned view + relink
 
 ---
 
@@ -14,7 +14,7 @@ session (see `CLAUDE.md`, workflow step 7).
 |---|---|---|---|---|
 | 0 | De-risk Explorer integration (spikes) | ✅ Done | 4 / 4 | ✅ 2026-10-31 |
 | 1 | Core library (no UI) | ✅ Done | 7 / 7 | ✅ 2026-10-31 (coverage 93.0%) |
-| 2 | App shell, editor, search | 🟡 In progress | 5 / 9 | — |
+| 2 | App shell, editor, search | 🟡 In progress | 6 / 9 | — |
 | 3 | Context menu + companion panel (**MVP**) | ⚪ Not started | 0 / 5 | — |
 | 4 | Hover tooltip + Win11 top-level menu | ⚪ Not started | 0 / 6 | — |
 | 5 | Reminders, portability, polish | ⚪ Not started | 0 / 5 | — |
@@ -42,7 +42,8 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.3 Note editor + compact window | ✅ | 2026-10-31 | `bdcdb4b` | ADR-014/015; e2e via UIA on Release; REQ-080 gap → O-15 |
 | T2.4 Library view | ✅ | 2026-11-01 | `0453133` | ADR-017; main window reused; O-9 and O-17 closed; live UIA check + `perf-check` on Release |
 | T2.5 Labels manager | ✅ | 2026-11-01 | `a5a4487` | ADR-018; REQ-012 "Settings → Labels" resolved as its own page; live UIA check + `perf-check` |
-| T2.6 Search palette + global hotkey | ⚪ next | | | |
+| T2.6 Search palette + global hotkey | ✅ | 2026-11-01 | _pending_ | ADR-019; "windows used" budget 90 → 100 MB (user, ADR-016 amendment); live UIA check with the real hotkey |
+| T2.7 Orphaned view + relink | ⚪ next | | | |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
 
@@ -56,6 +57,8 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | REQ-060 rename/move tracking | survives | rename, move, ancestor rename all keep the ID | S4 | ✅ NTFS |
 | Tracker evaluation cost | <10 ms (from S1) | 34 ms avg with late binding | S1 | ❌ must fix in T3.2 (typed interop + cache) |
 | REQ-051 search | <100 ms @ 10k | p95 8–54 ms over 10 query shapes (worst `due:30d`; typo fallback 30 ms), Debug build | T1.6 | ✅ |
+| REQ-051 search, Release | <100 ms @ 10k | p95 8.7–38.3 ms over the same 10 shapes (worst `due:30d`) | T2.6 | ✅ |
+| REQ-050 hotkey → palette | (no target) | ≈200 ms from the key press to the palette visible and focused (first open 243 ms, later 110–130 ms window time) | T2.6 | ✅ |
 | Upsert at 10k notes | (no target) | 10k upserts in one transaction ≈ 4 s (≈0.4 ms each) | T1.6 | ✅ |
 | REQ-060 `Resolve` cost | <5 ms (test bound) | passes; S4 measured 0.01 ms for the ID read | T1.4 | ✅ |
 | Phase 1 exit: Core coverage | ≥85% | 93.0% line / 86.6% branch (362 tests) | Phase 1 | ✅ |
@@ -74,6 +77,8 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | REQ-080 main window used (library, 8 notes) | <90 MB | max 81.8 MB open, 81.4 MB after close (≈100 MB private bytes); reopen 109–118 ms, first 242 ms | `perf-check` T2.4 | ✅ (8 MB headroom) |
 | NFR-06 growth, 8 main-window cycles | ≤4 MB | -2.8 MB | `perf-check` T2.4 | ✅ |
 | NFR-06 idle CPU after using the library | <0.1 % | 0 % | `perf-check` T2.4 | ✅ |
+| REQ-080 all windows used (editor + main + palette) | <100 MB (was 90) | max 94.2 MB open, 93.3 MB after close (≈116 MB private bytes); the palette adds ≈10 MB once | `perf-check` T2.6 | ✅ |
+| NFR-06 growth, 8 palette cycles | ≤4 MB | +3.3 MB by the rule (cycle 2's after-close reading dipped to 87.9 MB); open readings flat at 92–94 MB, so no growth | `perf-check` T2.6 | ✅ (watch) |
 | REQ-080 main window, Labels page visited | <90 MB | 81.8 MB open (102 MB private bytes) vs 77.5 MB on All notes only; 79.2 MB after close | T2.5 (manual) | ✅ (about 8 MB headroom) |
 | NFR-02 cold start | <1.5 s | 0.53–0.87 s from process start to tray + router ready (Release, warm disk, skeleton only) | T2.1 / T5.5 | 🟡 re-measure at T5.5 |
 
@@ -98,6 +103,7 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | O-14 | High-contrast look of chips, pills and windows (tokens map to system colours; tests check the file, but nobody has seen it on screen) and a live HC toggle re-rendering open chips | 05 § Design tokens | T2.9 manual | open: switching HC changes the user's whole desktop theme, so T2.2 didn't do it |
 | O-15 | REQ-080 is over target once a window has been used: ≈65 MB private working set (≈83 MB private bytes) vs <60 MB, the one-time cost of loading WinUI's controls. An idle `EmptyWorkingSet` would show 2.7 MB in Task Manager, but commit stays at 83 MB. Options: trim the working set when idle, change the target or metric, or host windows in a child process | REQ-080 / ADR-015 | before T2.4 | **closed** 2026-11-01: the user chose per-state budgets (ADR-016); no trimming, no UI process |
 | O-16 | Re-baseline the REQ-080 budgets (50 / 90 / 110 MB) once the companion panel and Acrylic exist, and add the panel and Explorer-navigation stages to `perf-check` | REQ-080 / NFR-06 / ADR-016 | T3.5 | open |
+| O-18 | "Windows used" over the 90 MB budget once the search palette exists: 91–93 MB with editor + main window + palette used, flat over 8 cycles each; the palette costs ≈10 MB | REQ-080 / ADR-016 | T2.6 | **closed** 2026-11-01: the user raised the budget to 100 MB (ADR-016 amendment); `perf-check` passes against it |
 | O-17 | `--edit` on a folder that doesn't exist opens a new "Can't open this note" window every time instead of reusing the open one (dedupe needs a folder key; found while writing `perf-check`) | 02 § Editor | T2.4 | **closed** 2026-11-01: deduped by path, ignoring case (05 § Editor behaviour); checked live |
 | O-8 | CI workflow actually runs green on GitHub `windows-latest` | 07 T1.1 | when a remote exists | open |
 
@@ -124,6 +130,27 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T2.6)
+- **T2.6 done:** the search palette. `Ctrl+Alt+N` from anywhere (also the tray and `--search`)
+  opens a 640 px Acrylic popup: recent notes when empty, results 120 ms after typing with matched
+  words in bold, parse errors under the box, `label:` / `status:` / `due:` autocomplete (Tab),
+  Enter = open folder in Explorer, Ctrl+Enter = open note in the library, Ctrl+C = copy path. It
+  closes on Esc or when it loses focus and is reused. 630/630 tests green in Release (Core 366, App 241 → 264).
+- **Spec changes made first:** 05 § Search palette behaviour, 02 § Search palette and
+  `ISearchService.Parse`, the T2.6 *Done when*, a palette stage in 06 § Resource budgets, ADR-019.
+- **Found live:** `Activate()` lost to the Windows foreground lock, so the palette opened behind the
+  current app and typing went there; and focus set before the window was really active was lost.
+  Fixed by joining the foreground window's input thread for the activation and focusing the box on
+  the window's Activated event (ADR-019 addendum).
+- **Memory (O-18):** with all three windows used the process sat at 91–93 MB, over the 90 MB budget
+  but flat (no leak); the palette costs ≈10 MB once. Deferring the Labels and Settings pages
+  (kept) and dropping Acrylic (reverted) made no measurable difference. **The user raised "windows
+  used" to 100 MB** and asked to prefer stable, predictable resource use over chasing small
+  increases, without rewrites unless profiling shows a real saving. O-16 (re-baseline after
+  Phase 3) stays. Full `perf-check` passes against the new budget (palette ≤ 94.2 MB). Its palette growth reads +3.3 MB only because cycle 2's after-close sample dipped; the open samples are flat.
+- **Live-check data:** the dev database was backed up before seeding and restored afterwards.
+- **Next:** T2.7 orphaned view + relink.
 
 ### 2026-11-01 (T2.5)
 - **T2.5 done:** a **Labels** page in the main window: every label with its usage ("Used by 3

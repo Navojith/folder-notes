@@ -40,7 +40,7 @@ public sealed class CommandRouterTests
     [Fact]
     public void REQ050_Search_OpensSearchWithQuery()
     {
-        _router.Route(new Search("acme"), ActivationSource.Tray);
+        _router.Route(new ActivationCommand.Search("acme"), ActivationSource.Tray);
         _shell.Calls.ShouldBe(["search acme"]);
     }
 

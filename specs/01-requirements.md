@@ -128,7 +128,7 @@ hides the badge (REQ-022).
 
 | ID | Pri | Requirement |
 |---|---|---|
-| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and stays within these memory budgets: **tray-only < 50 MB**; **editor open, or any window used and closed again, < 90 MB**; **Explorer companion panel active < 110 MB**. *Memory = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction. Private bytes are recorded next to it but have no budget. These are initial engineering targets, re-baselined after Phase 3 (ADR-016, O-16). Checked by `eng/perf-check.ps1` (06 § Resource budgets).* |
+| REQ-080 | M | The app shall run as a lightweight tray process that starts with Windows (setting, default on) and stays within these memory budgets: **tray-only < 50 MB**; **any window open, or used and closed again, < 100 MB** (was 90 MB until T2.6); **Explorer companion panel active < 110 MB**. *Memory = private working set (Task Manager's "Memory" column), measured 10 s after the last UI interaction. Private bytes are recorded next to it but have no budget. These are initial engineering targets, re-baselined after Phase 3 (ADR-016, O-16). Checked by `eng/perf-check.ps1` (06 § Resource budgets).* |
 | REQ-081 | M | Settings: panel on/off/position/width, hide-when-empty, tooltip on/off, hotkey, start with Windows, theme (system/light/dark), reminder time of day. |
 | REQ-082 | M | The UI shall follow the system theme and accent color and use Mica/Acrylic backdrops where available. |
 | REQ-083 | M | All UI shall be keyboard-navigable and screen-reader labelled (UIA names), with WCAG AA contrast. |

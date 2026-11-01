@@ -174,7 +174,28 @@ superseded), and specs 03/04 reflect what was learned.
   editor both showing "customer" and dropping the deleted label, the detail editor's next
   autosave not re-creating it, and Show notes → All notes filtered to customer (3 notes). Fixed
   live: a stale "already exists" error stayed after clearing the name. `perf-check` passes: tray-only 33.3 MB; editor open ≤ 69.6 MB; main window ≤ 82.5 MB; growth 1.2 / -2.5 MB; idle CPU 0 %. Visiting the Labels page adds about 4 MB (77.5 → 81.8 MB with only the main window used).*
-- [ ] **T2.6 🧱 Search palette + global hotkey** (REQ-050…053).
+- [x] **T2.6 🧱 Search palette + global hotkey** (REQ-050…053). See 05 § Search palette
+  behaviour, 02 § Search palette, ADR-019.
+  *Done when:* view-model tests (fake clock) cover the empty-box recent list, debounce, stale
+  results dropped, parse errors, no hits, selection and wrapping, Enter / missing folder,
+  Ctrl+Enter, Ctrl+C, and autocomplete accept; `SearchHighlight` and `SearchCompletion` have unit
+  tests; checked live on Release: `Ctrl+Alt+N` from another app opens the palette, typing finds
+  seeded notes with highlights, `label:` autocompletes, Enter opens Explorer at the folder,
+  Ctrl+Enter selects the note in the library, Ctrl+C puts the path on the clipboard, Esc and
+  clicking elsewhere close it, `--search acme` prefills; REQ-051's 100 ms holds for a keystroke at
+  10k notes (Release); `eng/perf-check.ps1` passes, with a palette stage.
+  *Done 2026-11-01: `SearchPaletteViewModel` / `SearchResultRow`, `SearchHighlight`,
+  `SearchCompletion`, `SearchPaletteWindow` (Acrylic, no title bar, reused, ADR-019),
+  `HighlightedText`, the hotkey on the tray window (`RegisterHotKey`, Ctrl+Alt+N), `--search` and
+  the tray opening the palette, `ISearchService.Parse`; Labels and Settings pages now load on
+  first visit. 23 new App tests. Checked live on Release with the real hotkey pressed while another
+  app was in front: the palette opens in ≈200 ms with the caret in the box, "acme" finds Acme with
+  bold matches, `label:cl` suggests `client` and Tab completes it, Ctrl+C copies the path, Enter
+  opens Explorer at the folder, Ctrl+Enter selects the note in the library, Esc and clicking
+  elsewhere close it, `--search acme label:client` prefills. Found and fixed live: the palette
+  stayed behind the foreground app and lost the caret (ADR-019 addendum). REQ-051 in Release at
+  10k notes: p95 8.7–38.3 ms over 10 query shapes. Memory: the palette costs ≈10 MB once, putting
+  "windows used" at 91–93 MB; the user raised that budget to 100 MB (ADR-016 amendment). `perf-check` (with the new palette stage) passes against 100 MB: tray-only 33.1 MB; editor ≤ 69.8 MB; main window ≤ 83.3 MB; palette ≤ 94.2 MB open / 93.3 MB closed (private bytes ≈ 115 MB); growth 0.2 / -2.4 / 3.3 MB; idle CPU 0 %.*
 - [ ] **T2.7 🧱 Orphaned view + relink** (REQ-061).
 - [ ] **T2.8 🧱 Settings page** (REQ-081) and start with Windows (Run key, or a StartupTask when packaged).
 - [ ] **T2.9 ✅ Accessibility pass** (REQ-083) with Accessibility Insights. No critical issues.

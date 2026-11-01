@@ -42,11 +42,11 @@ public sealed class ActivationParserTests
 
     [Fact]
     public void REQ050_Search_WithoutQuery_IsEmpty() =>
-        ActivationParser.Parse(["--search"]).ShouldBe(new Search(string.Empty));
+        ActivationParser.Parse(["--search"]).ShouldBe(new ActivationCommand.Search(string.Empty));
 
     [Fact]
     public void REQ050_Search_JoinsRemainingTokens() =>
-        ActivationParser.Parse(["--search", "acme", "label:client"]).ShouldBe(new Search("acme label:client"));
+        ActivationParser.Parse(["--search", "acme", "label:client"]).ShouldBe(new ActivationCommand.Search("acme label:client"));
 
     [Fact]
     public void REQ080_OpenNote_ParsesGuid()
@@ -82,7 +82,7 @@ public sealed class ActivationParserTests
 
     [Fact]
     public void REQ080_CommandLine_DropsExecutableByFileNameOnly() =>
-        ActivationParser.ParseCommandLine(@"foldernotes.EXE --search acme", Exe).ShouldBe(new Search("acme"));
+        ActivationParser.ParseCommandLine(@"foldernotes.EXE --search acme", Exe).ShouldBe(new ActivationCommand.Search("acme"));
 
     [Fact]
     public void REQ080_CommandLine_WithoutExecutable_StillParses() =>

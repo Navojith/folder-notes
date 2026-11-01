@@ -9,6 +9,11 @@ internal static unsafe partial class TrayNative
     public const uint WM_DESTROY = 0x0002;
     public const uint WM_CONTEXTMENU = 0x007B;
     public const uint WM_APP = 0x8000;
+    public const uint WM_HOTKEY = 0x0312;
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_NOREPEAT = 0x4000;
+    public const uint VK_N = 0x4E;
 
     public const uint NIM_ADD = 0x0;
     public const uint NIM_MODIFY = 0x1;
@@ -88,6 +93,14 @@ internal static unsafe partial class TrayNative
 
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial ushort RegisterClassExW(in WNDCLASSEXW wc);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint vk);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UnregisterHotKey(IntPtr hwnd, int id);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

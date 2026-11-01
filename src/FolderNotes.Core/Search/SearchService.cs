@@ -23,7 +23,12 @@ public sealed record SearchHit(Note Note, SearchMatchKind Kind, double Rank);
 
 public interface ISearchService
 {
+    /// <summary>Parses with today's local date (the palette shows the parse errors, T2.6).</summary>
+    ParsedQuery Parse(string rawQuery);
+
     Task<IReadOnlyList<SearchHit>> SearchAsync(string rawQuery, int limit, CancellationToken ct = default);
+
+    Task<IReadOnlyList<SearchHit>> SearchAsync(ParsedQuery query, int limit, CancellationToken ct = default);
 }
 
 /// <summary>REQ-051/052/023 search over <see cref="SqliteNoteStore"/> (03 § Search query grammar).</summary>

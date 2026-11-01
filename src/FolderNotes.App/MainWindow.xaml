@@ -43,10 +43,10 @@
         </StackPanel>
 
         <library:LibraryPage x:Name="Library" Grid.Row="1" />
-        <labels:LabelsPage x:Name="LabelsPage" Grid.Row="1" Visibility="Collapsed" />
+        <labels:LabelsPage x:Name="LabelsPage" Grid.Row="1" x:Load="False" />
 
         <!-- Settings stub until T2.8: only the theme choice (not saved across restarts yet). -->
-        <ScrollViewer x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed" Padding="24,16">
+        <ScrollViewer x:Name="SettingsPage" Grid.Row="1" x:Load="False" Padding="24,16">
           <StackPanel Spacing="{StaticResource SpacingL}" MaxWidth="640" HorizontalAlignment="Left">
             <TextBlock Text="Settings" Style="{StaticResource SubtitleTextBlockStyle}" />
             <RadioButtons x:Name="ThemeChoice" Header="Theme" MaxColumns="3"

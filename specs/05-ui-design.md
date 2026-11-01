@@ -230,7 +230,8 @@ Labels  6 labels
 
 #### Library behaviour (T2.4)
 
-`MainWindow` hosts a `NavigationView` (left, `PaneDisplayMode=Auto`). Items appear when their task
+`MainWindow` hosts a `NavigationView` (left, `PaneDisplayMode=Auto`). Pages other than All notes
+are created the first time they're opened (`x:Load`, since T2.6). Items appear when their task
 lands: **All notes** (T2.4), **Labels** (T2.5), Orphaned (T2.7), Due & reminders (T5.1), and in the
 footer **Settings** (T2.8). Until T2.8 the Settings page holds only the Theme choice that the
 T2.2 token sample had (System / Light / Dark, not saved across restarts). The token sample is gone.
@@ -308,6 +309,49 @@ T2.2 token sample had (System / Light / Dark, not saved across restarts). The to
 - A 640 px wide Acrylic window centered on the active monitor, top third. It closes when it loses
   focus or on `Esc`.
 - Matched terms are highlighted. Filter chips autocomplete after typing `label:`, `status:`, `due:`.
+
+#### Search palette behaviour (T2.6)
+
+- **Opening.** The global hotkey (REQ-050; `Ctrl+Alt+N` until Settings makes it configurable in
+  T2.8), a left-click on the tray icon, the tray menu's *Search…*, and `--search [query]` (the query
+  is put in the box). Opening when it's already open brings it to the front and selects the text.
+  If the hotkey can't be registered (another app has it), the app logs a warning and keeps
+  working; T2.8 shows that state in Settings.
+- **Window.** 640 effective px wide, no title bar, not in the taskbar or Alt+Tab, Acrylic
+  (`DesktopAcrylicBackdrop`, solid fallback). Centred horizontally on the monitor of the foreground
+  window (the cursor's monitor if there is none), its top at 20 % of that monitor's work area.
+  Height fits the content: the box, up to 8 visible rows (the list scrolls), and the footer. It's
+  hidden, not destroyed, when it closes (ADR-015), and closes on `Esc`, when it loses focus, and
+  after an open action. It takes the foreground even when another app is in front, with the caret
+  in the box and the text selected (ADR-019).
+- **Results.** Empty box: the 8 most recently updated notes. Otherwise the search runs 120 ms after
+  the last keystroke (any search still running is abandoned) and shows up to 20 hits in the
+  service's order (03 § Search query grammar). The first row is selected. A parse error
+  (`status:bogus`) shows under the box in the caution colour; the rest of the query still runs.
+  No hits: "No notes match".
+- **Row:** accent bar, title with the matched parts highlighted, status pill and up to 3 label
+  chips on the right; second line: the path (middle-trimmed to 60 characters) and the next date
+  (05 § Library behaviour). An orphaned note's second line ends with "Folder not found".
+- **Highlighting** (`SearchHighlight.Ranges`): for each text term and each word of a phrase, every
+  word in the title or path that starts with it, ignoring case and diacritics, is bold for the
+  length of the term. Fuzzy hits have nothing highlighted.
+- **Keys (REQ-053).** Up / Down move the selection (also from the box; they wrap). **Enter** opens
+  the selected note's folder in Explorer and closes the palette; if the folder doesn't exist, the
+  footer says "Folder not found" and the palette stays. **Ctrl+Enter** opens the note in the main
+  window's library (`--open-note` behaviour) and closes. **Ctrl+C** copies the selected note's
+  path when the box has no selected text (otherwise it copies the text, as usual); the footer says
+  "Path copied" for 2 s and the palette stays open. A click on a row selects it and does Enter.
+- **Footer:** `↵ open folder · Ctrl+↵ open note · Ctrl+C copy path`, or a short message (above)
+  for 2 s, plus the result count ("5 results", a polite live region).
+- **Autocomplete** (`SearchCompletion.Suggest`): when the text before the caret ends in a token
+  `label:<partial>`, `status:<partial>` or `due:<partial>` (key case ignored, a leading `"` in
+  the value allowed), the list shows suggestions instead of results: label names (quoted when they
+  contain a space), the six statuses, or `overdue`, `7d`, `30d`, `90d`, that start with the
+  partial value (all of them for an empty value), at most 8, in that order. Up / Down move, and
+  **Tab** or **Enter** puts the full token in the box followed by a space (results come back).
+  `Esc` closes the suggestions first, then the palette.
+- **UIA:** the box is "Search notes"; rows are named like library rows; the suggestion list is
+  "Suggestions".
 
 ### 5. Tray
 

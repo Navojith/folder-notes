@@ -26,6 +26,7 @@ internal sealed unsafe class TrayIcon : IDisposable
     private const uint CallbackMessage = WM_APP + 1;
     private const uint IconId = 1;
     private const string ClassName = "FolderNotes.TrayWindow";
+    private const int HotkeyId = 1;
 
     // One tray icon per process (single instance), so the window proc can find it statically.
     private static TrayIcon? s_current;
@@ -36,6 +37,7 @@ internal sealed unsafe class TrayIcon : IDisposable
     private IntPtr _hwnd;
     private IntPtr _icon;
     private bool _added;
+    private bool _hotkeyRegistered;
 
     public TrayIcon(ILogger log)
     {
@@ -81,6 +83,30 @@ internal sealed unsafe class TrayIcon : IDisposable
     /// <summary>Raised on the UI thread for a click or a menu choice.</summary>
     public event EventHandler<TrayCommand>? CommandInvoked;
 
+    /// <summary>The global search hotkey was pressed (REQ-050, ADR-019).</summary>
+    public event EventHandler? HotkeyPressed;
+
+    /// <summary>
+    /// Registers the global hotkey on this window (<c>MOD_NOREPEAT</c> is added). False when another
+    /// app owns it; the caller logs that (05 § Search palette behaviour).
+    /// </summary>
+    public bool RegisterHotkey(uint modifiers, uint virtualKey)
+    {
+        if (_hotkeyRegistered)
+        {
+            _ = UnregisterHotKey(_hwnd, HotkeyId);
+            _hotkeyRegistered = false;
+        }
+
+        _hotkeyRegistered = RegisterHotKey(_hwnd, HotkeyId, modifiers | MOD_NOREPEAT, virtualKey);
+        if (!_hotkeyRegistered)
+        {
+            _log.Warning("Couldn't register the search hotkey (error {Error}); another app may own it", Marshal.GetLastPInvokeError());
+        }
+
+        return _hotkeyRegistered;
+    }
+
     /// <summary>Whether "Panel on/off" is enabled in the menu (Phase 3 turns it on).</summary>
     public bool PanelAvailable { get; set; }
 
@@ -95,6 +121,12 @@ internal sealed unsafe class TrayIcon : IDisposable
         }
 
         Remove();
+        if (_hotkeyRegistered)
+        {
+            _ = UnregisterHotKey(_hwnd, HotkeyId);
+            _hotkeyRegistered = false;
+        }
+
         _ = DestroyWindow(_hwnd);
         _hwnd = IntPtr.Zero;
         if (_icon != IntPtr.Zero)
@@ -182,6 +214,13 @@ internal sealed unsafe class TrayIcon : IDisposable
                 ShowMenu(LowWord(wParam), HighWord(wParam));
             }
 
+            return IntPtr.Zero;
+        }
+
+        if (msg == WM_HOTKEY && wParam == HotkeyId)
+        {
+            _log.Debug("Search hotkey pressed");
+            HotkeyPressed?.Invoke(this, EventArgs.Empty);
             return IntPtr.Zero;
         }
 

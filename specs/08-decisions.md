@@ -211,6 +211,15 @@ run as a regression check (06 § Resource budgets).
 **Not allowed:** working-set trimming (`EmptyWorkingSet`, `SetProcessWorkingSetSize`) and a
 separate UI process. The app stays one process with one database writer (ADR-011). `IdleTrim`'s
 compacting GC stays, because it releases real managed memory.
+*Amended 2026-11-01 (T2.6, the user's decision):* "windows used" goes from **< 90 MB to < 100 MB**.
+With the editor, the main window and the search palette all used, the process measured 91–93 MB,
+flat over 8 open/close cycles of each (no leak): the palette window costs about 10 MB once. Two
+cheap fixes changed nothing measurable (creating the Labels and Settings pages on first visit,
+kept; and a solid background instead of Acrylic on the palette, reverted). A lighter results list
+isn't pursued without profiling evidence that it would save meaningfully. Tray-only (< 50 MB) and
+panel (< 110 MB) are unchanged, and the post-Phase-3 re-baseline (O-16) still applies. Guidance
+from the user: prefer stable, predictable resource use over chasing small, flat increases; what
+must never happen is growth.
 **Consequences:** Budgets are honest (what Task Manager shows is what the app uses) and need no
 runtime code. A looser target can creep, so the check also fails on growth (≤ 4 MB over 8 cycles,
 ≤ 8 MB over the 120-cycle soak) and is run before ticking any task that adds a window. First run
@@ -248,3 +257,23 @@ replace the old ones, and labels that no longer exist are dropped without counti
 never resurrects a deleted label, and chips in open editors always match the Labels page. If the
 user had unsaved label edits in an editor at that moment, only the deleted label is lost from
 them (it no longer exists).
+
+## ADR-019: The palette is a reused popup window; the hotkey lives on the tray window — *accepted (T2.6, 2026-11-01)*
+
+**Context:** REQ-050 needs a hotkey that works from any app, and the palette must appear quickly
+and in front of the app the user is in. WinUI has no global hotkey API. A new window per opening
+would leak native memory (ADR-015) and pay the creation cost each time.
+**Decision:** `RegisterHotKey` on the tray icon's hidden Win32 window (it already exists, ADR-012,
+and lives on the UI thread). The palette is one WinUI window without a title bar, hidden from the
+taskbar and Alt+Tab, created on first use and hidden after that. It closes on `Esc`, on losing
+focus and after an open action, the usual command-palette behaviour. Ctrl+C copies the selected
+note's path only when the box has no selected text, so normal text copy still works.
+*Added during T2.6 (found live):* `Activate()` alone left the palette behind the app the user was
+in (the foreground lock), so typing went to that app. The palette now briefly attaches to the
+foreground window's input thread (`AttachThreadInput`), calls `BringWindowToTop` +
+`SetForegroundWindow`, and detaches; and it puts the caret in the box when the window is actually
+activated, because focus set before that is lost.
+**Consequences:** The first opening pays for creating the window (measured in T2.6), later ones
+don't. The hotkey works while the app runs, including tray-only. If another app owns the hotkey,
+registration fails and only the tray can open the palette until Settings (T2.8) lets the user
+pick another one. The palette's window adds to the "windows used" memory (REQ-080).

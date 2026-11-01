@@ -5,14 +5,15 @@
     1. tray-only idle: private working set, private bytes, CPU over an idle window
     2. N editor open/close cycles (default 8): memory with the editor open, and 10 s after close
     3. N main window open/close cycles (default 8): the library on All notes, open and 10 s after close
-    4. idle CPU again after the windows were used
+    4. N search palette open/close cycles (default 8, since T2.6): `--search`, open and 10 s after close
+    5. idle CPU again after the windows were used
   Then checks the budgets and the cycle-to-cycle growth, prints a table, and exits 1 on a failure.
 
   The editor is opened with `--edit` on an empty scratch folder (-Folder) and closed without typing, so it is a
   draft that is never saved (ADR-014): the check leaves nothing in the notes database.
 
   Run against a Release build with Windows PowerShell 5.1:
-    powershell -File eng\perf-check.ps1                       # 8 editor + 8 main window cycles, ~7 minutes
+    powershell -File eng\perf-check.ps1                       # 8 editor + 8 main window + 8 palette cycles, ~10 minutes
     powershell -File eng\perf-check.ps1 -Cycles 120 -GrowthBudgetMB 8   # extended session (~30 minutes)
   It kills any running FolderNotes process first.
 #>
@@ -20,11 +21,12 @@ param(
     [string]$Exe = (Join-Path $PSScriptRoot '..\src\FolderNotes.App\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\FolderNotes.exe'),
     [int]$Cycles = 8,
     [int]$MainCycles = 8,
+    [int]$PaletteCycles = 8,
     [string]$Folder = 'C:\Temp\FolderNotesPerf\perf-check',
     [int]$IdleSeconds = 60,
     # Budgets (REQ-080 / NFR-06). Initial targets; re-baselined after Phase 3 (O-16).
     [double]$TrayBudgetMB = 50,
-    [double]$EditorBudgetMB = 90,
+    [double]$EditorBudgetMB = 100,   # "windows used" (90 until T2.6, ADR-016 amendment)
     [double]$GrowthBudgetMB = 4,     # private bytes after close, cycle 2 -> last cycle
     [double]$IdleCpuBudgetPct = 0.1  # average % of one core while idle
 )
@@ -103,6 +105,7 @@ Write-Host ("tray only:      {0} MB working set, {1} MB private bytes, {2}% CPU 
 
 $rows = Cycles $Cycles "--edit `"$folder`"" $title 'editor'
 $mainRows = if ($MainCycles -gt 0) { Cycles $MainCycles '' 'Folder Notes' 'main' } else { @() }
+$paletteRows = if ($PaletteCycles -gt 0) { Cycles $PaletteCycles '--search' ('Search ' + [char]0x00B7 + ' Folder Notes') 'search' } else { @() }
 $usedCpu = IdleCpu $IdleSeconds
 Write-Host ("after use:      {0}% CPU idle" -f $usedCpu)
 Get-Process FolderNotes | Stop-Process -Force
@@ -123,6 +126,14 @@ $checks = @(
         [pscustomobject]@{ Check = 'main window open working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxMainOpen MB"; Pass = $maxMainOpen -lt $EditorBudgetMB }
         [pscustomobject]@{ Check = 'main window closed working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxMainClosed MB"; Pass = $maxMainClosed -lt $EditorBudgetMB }
         [pscustomobject]@{ Check = "main window growth, cycle 2 -> $MainCycles"; Budget = "<= $GrowthBudgetMB MB"; Measured = "$mainGrowth MB"; Pass = $mainGrowth -le $GrowthBudgetMB }
+    }
+    if ($paletteRows.Count -gt 0) {
+        $maxPalOpen = ($paletteRows | Measure-Object OpenWs -Maximum).Maximum
+        $maxPalClosed = ($paletteRows | Measure-Object ClosedWs -Maximum).Maximum
+        $palGrowth = Growth $paletteRows
+        [pscustomobject]@{ Check = 'palette open working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxPalOpen MB"; Pass = $maxPalOpen -lt $EditorBudgetMB }
+        [pscustomobject]@{ Check = 'palette closed working set (max)'; Budget = "< $EditorBudgetMB MB"; Measured = "$maxPalClosed MB"; Pass = $maxPalClosed -lt $EditorBudgetMB }
+        [pscustomobject]@{ Check = "palette growth, cycle 2 -> $PaletteCycles"; Budget = "<= $GrowthBudgetMB MB"; Measured = "$palGrowth MB"; Pass = $palGrowth -le $GrowthBudgetMB }
     }
     [pscustomobject]@{ Check = 'idle CPU, tray only'; Budget = "< $IdleCpuBudgetPct %"; Measured = "$trayCpu %"; Pass = $trayCpu -lt $IdleCpuBudgetPct }
     [pscustomobject]@{ Check = 'idle CPU, after use'; Budget = "< $IdleCpuBudgetPct %"; Measured = "$usedCpu %"; Pass = $usedCpu -lt $IdleCpuBudgetPct }

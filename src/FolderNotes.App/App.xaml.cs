@@ -105,12 +105,17 @@ public partial class App : Application
             _shell.LibraryFactory = () => new Library.LibraryViewModel(store, store, events, editors, TimeProvider.System, _log);
             _shell.LabelsFactory = () => new Labels.LabelsViewModel(store, events, _log);
             _shell.NoteEvents = events;
+            var search = _services.GetRequiredService<ISearchService>();
+            _shell.SearchFactory = () => new Search.SearchPaletteViewModel(search, store, uiDispatcher, TimeProvider.System, _log);
         }
 
         _router = _services.GetRequiredService<CommandRouter>();
 
         var tray = _services.GetRequiredService<TrayIcon>();
         tray.CommandInvoked += (_, command) => OnTrayCommand(command);
+        tray.HotkeyPressed += (_, _) => _router?.Route(new ActivationCommand.Search(string.Empty), ActivationSource.Tray);
+        // REQ-050: Ctrl+Alt+N until Settings makes it configurable (T2.8).
+        tray.RegisterHotkey(Shell.TrayNative.MOD_CONTROL | Shell.TrayNative.MOD_ALT, Shell.TrayNative.VK_N);
 
         // Our own args first, then anything a second launch forwarded meanwhile.
         _router.Route(_store is null ? new ActivationCommand.ShowMain() : ActivationParser.Parse(_args), ActivationSource.Startup);

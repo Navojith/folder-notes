@@ -208,6 +208,20 @@ Resolved in T2.1:
 - "Show notes" calls `LibraryViewModel.ShowOnlyLabelAsync(name)` and switches the main window to
   All notes.
 
+## Search palette (T2.6)
+
+- **Hotkey:** `TrayIcon` registers it with `RegisterHotKey` on its hidden window (02 § App shell,
+  ADR-012) with `MOD_NOREPEAT`, and raises `HotkeyPressed` on `WM_HOTKEY`. Receiving the hotkey
+  lets the process take the foreground, so the palette can activate itself. Unregistered on Quit.
+- **`SearchPaletteViewModel`** (no XAML types): query, debounce (120 ms on `TimeProvider`, like the
+  editor's autosave), cancellation of stale searches, results (`SearchResultRow`), selection,
+  autocomplete, footer message, and the open / copy actions. Dependencies: `ISearchService`
+  (which now also exposes `Parse`), `ILabelRepository` (label names for autocomplete),
+  `IUiDispatcher`, `TimeProvider`, `ILogger`. Pure helpers: `SearchHighlight`,
+  `SearchCompletion`.
+- **`SearchPaletteWindow`** hosts the view; `AppShell.OpenSearch(query)` creates it once and
+  re-shows it. *Open note* goes through `AppShell.OpenNote`.
+
 ## Markdown (REQ-007)
 
 `MarkdownModel.Parse(string)` (Markdig 1.4, task lists + auto-links, HTML not rendered) turns the
@@ -246,7 +260,9 @@ public interface ILabelRepository {                  // REQ-010, 012, 013
 // 03 § Orphan detection pass over the repository and IFolderIdentityService.
 
 public interface ISearchService {
+    ParsedQuery Parse(string rawQuery);             // with today's local date (T2.6: the palette shows parse errors)
     Task<IReadOnlyList<SearchHit>> SearchAsync(string rawQuery, int limit, CancellationToken ct);
+    Task<IReadOnlyList<SearchHit>> SearchAsync(ParsedQuery query, int limit, CancellationToken ct);
 }
 
 public interface IFolderIdentityService {

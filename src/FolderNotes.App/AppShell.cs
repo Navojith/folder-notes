@@ -25,6 +25,11 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Creates the main window's library. Null when the database couldn't be opened.</summary>
     public Func<Library.LibraryViewModel>? LibraryFactory { get; set; }
 
+    /// <summary>Creates the search palette's view model. Null when the database couldn't be opened.</summary>
+    public Func<Search.SearchPaletteViewModel>? SearchFactory { get; set; }
+
+    private Search.SearchPaletteWindow? _palette;
+
     /// <summary>Creates the main window's Labels page. Null when the database couldn't be opened.</summary>
     public Func<Labels.LabelsViewModel>? LabelsFactory { get; set; }
 
@@ -62,7 +67,7 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     /// <summary>Runs once the last window has closed (REQ-080).</summary>
     public Services.IdleTrim? IdleTrim { get; set; }
 
-    private bool AllClosed => (_main is null || !_main.IsShown) && _editors.Count == 0;
+    private bool AllClosed => (_main is null || !_main.IsShown) && (_palette is null || !_palette.IsShown) && _editors.Count == 0;
 
     private void OnWindowClosed()
     {
@@ -90,8 +95,39 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
     public void OpenEditor(string folderPath) =>
         OpenEditorWindow(vm => vm.LoadForFolderAsync(folderPath), $"--edit {folderPath}");
 
-    // T2.6 replaces this with the search palette.
-    public void OpenSearch(string query) => Show(query.Length == 0 ? "Search requested" : $"Search requested: {query}");
+    /// <summary>The search palette (05 § Search palette behaviour, ADR-019): created once, then re-shown.</summary>
+    public async void OpenSearch(string query)
+    {
+        if (SearchFactory is null)
+        {
+            Show(_startupError ?? "The notes database isn't available.");
+            return;
+        }
+
+        if (_palette is null)
+        {
+            var palette = _palette = new Search.SearchPaletteWindow(SearchFactory(), _log);
+            _theme.Register(palette);
+            palette.ViewModel.OpenNoteRequested += (_, id) => OpenNote(id);
+            palette.Hidden += (_, _) => OnWindowClosed();
+            palette.Closed += (_, _) =>
+            {
+                _theme.Unregister(palette);
+                palette.ViewModel.Dispose();
+            };
+        }
+
+        try
+        {
+            await _palette.ShowAsync(query ?? "");
+        }
+#pragma warning disable CA1031 // Tell the user instead of crashing the tray.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            _log.Error(ex, "Opening the search palette failed");
+        }
+    }
 
     /// <summary><c>--open-note</c>: the main window's library selects the note (05 § Library behaviour).</summary>
     public async void OpenNote(Guid noteId)
@@ -116,9 +152,11 @@ internal sealed class AppShell(ThemeService theme, ILogger log) : IAppShell
         }
     }
 
-    /// <summary>Quit: flush the library's editor and destroy the main window.</summary>
+    /// <summary>Quit: flush the library's editor and destroy the main window (and the palette).</summary>
     public async Task CloseMainWindowAsync()
     {
+        _palette?.CloseForGood();
+        _palette = null;
         if (_main is { } main)
         {
             _main = null;

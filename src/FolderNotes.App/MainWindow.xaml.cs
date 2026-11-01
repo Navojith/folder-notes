@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window, IThemeTarget
     private readonly ThemeService _theme;
     private readonly ILogger _log;
     private bool _syncingChoice;
+    private AppTheme _appTheme;
     private bool _closingForGood;
 
     internal MainWindow(ThemeService theme, LibraryViewModel? library, Labels.LabelsViewModel? labels, ILogger log)
@@ -32,8 +33,6 @@ public sealed partial class MainWindow : Window, IThemeTarget
         AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "FolderNotes.ico"));
         AppWindow.Resize(Scale(LogicalWidth, LogicalHeight));
         Library.ViewModel = library;
-        LabelsPage.ViewModel = labels;
-        LabelsPage.ShowNotesRequested += OnShowNotesRequested;
         Library.Visibility = library is null ? Visibility.Collapsed : Visibility.Visible;
         Nav.SelectedItem = AllNotesItem;
         AppWindow.Closing += OnClosing;
@@ -57,9 +56,36 @@ public sealed partial class MainWindow : Window, IThemeTarget
             AppTheme.Dark => TitleBarTheme.Dark,
             _ => TitleBarTheme.UseDefaultAppMode,
         };
+        _appTheme = theme;
+        SyncThemeChoice();
+    }
+
+    private void SyncThemeChoice()
+    {
+        if (ThemeChoice is null)
+        {
+            return; // the Settings page isn't created until it's first opened (x:Load)
+        }
+
         _syncingChoice = true;
-        ThemeChoice.SelectedIndex = (int)theme;
+        ThemeChoice.SelectedIndex = (int)_appTheme;
         _syncingChoice = false;
+    }
+
+    /// <summary>Pages other than All notes are created on first visit (x:Load), to keep memory down (REQ-080).</summary>
+    private void EnsurePage(object page)
+    {
+        if (ReferenceEquals(page, LabelsItem) && LabelsPage is null && LabelsViewModel is not null)
+        {
+            _ = Root.FindName(nameof(LabelsPage));
+            LabelsPage!.ViewModel = LabelsViewModel;
+            LabelsPage.ShowNotesRequested += OnShowNotesRequested;
+        }
+        else if (ReferenceEquals(page, SettingsItem) && SettingsPage is null)
+        {
+            _ = Root.FindName(nameof(SettingsPage));
+            SyncThemeChoice();
+        }
     }
 
     /// <summary>Shows (or re-shows) the window and refreshes the library (05: relative times, first load).</summary>
@@ -133,9 +159,17 @@ public sealed partial class MainWindow : Window, IThemeTarget
     private async void OnNavSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         var page = args.SelectedItem;
-        SettingsPage.Visibility = ReferenceEquals(page, SettingsItem) ? Visibility.Visible : Visibility.Collapsed;
+        EnsurePage(page);
+        if (SettingsPage is not null)
+        {
+            SettingsPage.Visibility = ReferenceEquals(page, SettingsItem) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         Library.Visibility = ReferenceEquals(page, AllNotesItem) && LibraryViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
-        LabelsPage.Visibility = ReferenceEquals(page, LabelsItem) && LabelsViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (LabelsPage is not null)
+        {
+            LabelsPage.Visibility = ReferenceEquals(page, LabelsItem) && LabelsViewModel is not null ? Visibility.Visible : Visibility.Collapsed;
+        }
         if (ReferenceEquals(page, LabelsItem) && LabelsViewModel is { } labels)
         {
             try
