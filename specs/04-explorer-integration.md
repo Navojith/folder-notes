@@ -102,9 +102,11 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
 #### B. COM interop
 
 1. **Typed only (ADR-007).** Hand-declared `[GeneratedComInterface]` interfaces (decision D1 in 09; recommended)
-   for exactly the surface used: `IShellWindows` (`get_Count`, `Item`), `IServiceProvider`, `IShellBrowser` /
-   `IOleWindow` (`GetWindow`, `QueryActiveShellView`), `IPersistFolder2` (`GetCurFolder`), `IWebBrowser2`
-   (`get_HWND`, `get_LocationURL`) and the shell helpers `SHGetNameFromIDList(SIGDN_FILESYSPATH)` / `ILFree`.
+   for exactly the surface used: `IShellWindows` (`get_Count`, `Item`), `IWebBrowser2` (`get_HWND` only),
+   `IServiceProvider` (`QueryService`), `IShellBrowser` / `IOleWindow` (`GetWindow`, `QueryActiveShellView`),
+   `IShellView` (cast only), `IFolderView` (`GetFolder`), `IPersistFolder2` (`GetCurFolder`) and the shell helpers
+   `SHGetNameFromIDList(SIGDN_FILESYSPATH)` / `ILFree`. Every method is `[PreserveSig]` (raw `HRESULT`, classified by
+   us). Validated by S5/P1 (§ H): vtable order and arity against the SDK headers, live calls, `VARIANT`, casts, release.
    `IDispatch`-derived interfaces are declared with their four `IDispatch` slots as placeholders and are only
    called through their vtable. No `dynamic`, `InvokeMember`, `Type.GetTypeFromProgID` + reflection, or
    `Activator` on a COM type. `Item(VARIANT)` takes a private blittable `Variant` struct (`VT_I4` index); probe P1
@@ -118,16 +120,18 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    loop (also required by the out-of-context WinEvent hooks). Every RCW is created, used and released on it.
    No COM reference leaves that thread; what crosses to the UI is the immutable `ActiveFolderState` (an nint and
    a string).
-3. **Ownership.** Every RCW lives in a `ComRef<T>` (`IDisposable`; `Release()` = `Marshal.FinalReleaseComObject`
-   on the STA thread; idempotent). Owners: `ComShellWindowsGateway` owns the `IShellWindows` root; `TabMap` owns one
+3. **Ownership.** Every RCW lives in a `ComRef<T>` (`IDisposable`; `Release()` = **`ComObject.FinalRelease()`**
+   on the STA thread; idempotent). `Marshal.ReleaseComObject` / `FinalReleaseComObject` throw `ArgumentException` on
+   source-generated RCWs (S5/P1), so they are never used. Owners: `ComShellWindowsGateway` owns the `IShellWindows` root; `TabMap` owns one
    `ComRef` per tab (the smallest interface that can read the path; the `IShellView`, folder and PIDL objects
    are acquired, used and released inside a single `TryReadPath`). Shutdown order: tab refs → root →
    `CoUninitialize`. A live-RCW counter (always on; it is one integer) is asserted to be 0 at the end of every
    gateway test. *Why prompt release matters beyond our memory:* a reference we keep to a closed tab keeps that
    object alive inside Explorer, so a stale reference is a small leak in Explorer, against principle 1.
-4. **Not re-entrant.** While the STA thread waits on an outgoing call, COM dispatches window messages to it. The
-   message handler is guarded: if an evaluation is running, a new request only sets the dirty flag. WinEvent
-   callbacks do nothing but set a flag and post one message.
+4. **Not re-entrant.** While the STA thread waits on an outgoing call, COM dispatches **WinEvent callbacks** to it
+   (S5/P2 measured this; posted thread messages are not dispatched). Callbacks therefore do nothing but set a flag
+   and post one message, and the evaluation handler keeps a guard: if an evaluation is running, a new request only
+   sets the dirty flag.
 5. **Failure classification** (`ComFailureClassifier`). Nothing throws out of the loop: every entry point is
    wrapped, failures are counted, and logged at most once per 10 s per class.
 
@@ -135,12 +139,13 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    |---|---|---|
    | `Transient` | `RPC_E_CALL_REJECTED` 0x80010001, `RPC_E_SERVERCALL_RETRYLATER` 0x8001010A, `RPC_E_CALL_CANCELED` 0x80010002 | keep the entry; retry on the ladder (§D.4); publish nothing new until it resolves |
    | `Gone` | `RPC_E_DISCONNECTED` 0x80010108, `CO_E_OBJNOTCONNECTED` 0x800401FD, `RPC_E_SERVER_DIED` 0x80010007, `RPC_E_SERVER_DIED_DNE` 0x80010012, `RPC_S_SERVER_UNAVAILABLE` 0x800706BA, `RPC_S_CALL_FAILED` 0x800706BE, `RPC_E_INVALID_OBJECT` 0x80010114 | drop **that** entry (release it); if it came from the root `IShellWindows`, run recovery (§F) |
-   | `Other` | `E_FAIL`, `E_NOINTERFACE`, `E_NOTIMPL`, `E_UNEXPECTED` | `path = null` for that tab this time; after 3 in a row on one entry, drop it |
+   | `Other` | `E_FAIL`, `E_NOINTERFACE`, `E_NOTIMPL`, `E_UNEXPECTED` | `path = null` for that tab this time; after 3 in a row on one entry, drop it. **Exception (S5/P1):** `E_FAIL` for a tab whose `IsWindow(tabHwnd)` is false is `Gone`: a closed window's objects return `E_FAIL`, not a disconnect code |
 6. **Time-boxing** (a COM call has no timeout of its own). Two layers, because the first may not apply to every call:
    - *Cancel.* The STA thread calls `CoEnableCallCancellation` once. A **watchdog** (a separate thread that waits
      on an event; it is idle unless an evaluation is running) records "evaluation started at t". Past
      **250 ms (tunable)** it calls `CoCancelCall(staThreadId, 0)`; the blocked call returns
-     `RPC_E_CALL_CANCELED` (`Transient`). Probe P2 proves this against a real out-of-process server.
+     `RPC_E_CALL_CANCELED` (`Transient`). S5/P2 measured this against a real out-of-process server (§ H); it has **not**
+     been shown against Explorer itself, which we will not hang.
    - *Abandon.* If the evaluation is still blocked **1 s (tunable)** after the cancel (cancellation only works for
      calls through a COM proxy, and not inside non-COM waits), the thread is declared **wedged**: the watchdog
      bumps the `generation`, publishes `Inactive`, abandons the thread (background thread, never joined) and
@@ -245,11 +250,12 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
 
 #### E. Reading the path
 
-Primary: `QueryService(SID_STopLevelBrowser)` → `IShellBrowser.QueryActiveShellView` → `IPersistFolder2.GetCurFolder`
-→ `SHGetNameFromIDList(SIGDN_FILESYSPATH)`; a failing conversion = virtual folder = `null`. Fallback:
-`IWebBrowser2.get_LocationURL` → `PathCreateFromUrl`. The S1 late-bound route (`Document.Folder.Self.Path`) is not
-used (ADR-007). Probe P3 decides which is primary, by parity on: normal, Unicode, UNC, mapped drive, This PC, Home,
-Recycle Bin, a search result, a `.zip` browsed in Explorer, an MTP device. The tracker reports the string the
+**One route** (S5/P3): `QueryService(SID_STopLevelBrowser)` → `IShellBrowser.QueryActiveShellView` → cast `IFolderView`
+→ `GetFolder(IID_IPersistFolder2)` → `GetCurFolder` → `SHGetNameFromIDList(SIGDN_FILESYSPATH)`; the conversion
+failing with `E_INVALIDARG` = virtual folder = `null`. The `LocationURL` fallback was **dropped**: it mangles UNC
+paths (`\\localhost\C$\WINDOWS` became `\C$\WINDOWS`) and covered nothing route A doesn't. The S1 late-bound route is
+not used (ADR-007). P3 compared the routes on: normal, Unicode, known folder, drive root, UNC, This PC, Home, Quick
+Access, Recycle Bin, Libraries, a `.zip`, and a search result (not obtained, see § H). The tracker reports the string the
 shell gives; checking that it is a real directory is the consumer's job (`IFolderIdentityService.TryResolve`).
 
 #### F. Reliability and recovery
@@ -292,7 +298,7 @@ Not every Explorer event can be observed reliably. Each limit and what the desig
 |---|---|---|
 | L1 | WinEvents are asynchronous, unordered relative to COM state, can be coalesced or dropped under load, and `NAMECHANGE` does not guarantee the *path* changed. | Every event only means "re-read"; truth is read from the shell; the poll and the 30 s reconciliation stay. |
 | L2 | There is **no documented event for "active tab changed"** or "navigation committed". S1 saw `NAMECHANGE` / `SHOW` / `HIDE` fire for them on build 22631; that is observed behaviour, not a contract, and may differ on 24H2 and later builds, and on Windows 10. | Poll fallback stays; the T3.5 matrix runs on 3 builds; without the tab class the logic degrades to one implicit tab. |
-| L3 | Out-of-context hooks need a message loop and arrive as messages, so they are delayed while the STA thread is in a COM call. | Time-boxed calls (§B.6); not re-entrant (§B.4). |
+| L3 | Out-of-context hooks need a message loop. **Measured (S5/P2):** while the STA thread waits inside an outgoing COM call, COM's wait loop still dispatches WinEvent callbacks to it (7 during one 257 ms call), but not posted thread messages. | Callbacks only set a flag and post (§B.4); the evaluation is posted, so it is not re-entered; time-boxed calls (§B.6). |
 | L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. | Cancel, then abandon the thread; circuit breaker. |
 | L5 | `IShellWindows` registers a window after its HWND exists and removes it around the HWND's destruction. | Retry ladder; `IsWindow` and `Gone` checks; reconciliation. |
 | L6 | `TaskbarCreated` is broadcast only to top-level windows, only when a taskbar is created, and not when the shell restarts without one. | Forwarded from the tray window **and** detected independently (`Gone`, shell process change). |
@@ -304,6 +310,81 @@ Not every Explorer event can be observed reliably. Each limit and what the desig
 | L12 | Windows 10 22H2 has no tabs and could not be tested here (09 O-6). | Windows 11 evidence is not Windows 10 evidence; O-6 stays open until checked on Windows 10. |
 
 Emitted event: `ActiveFolderChanged { FrameHwnd, TabHwnd, Path?, Sequence }` (§D.8).
+
+#### H. S5 probe findings (T3.2.1, 2026-11-01, Windows 11 23H2 build 22631, .NET 10, `spikes/S5-tracker-probes`)
+
+**P1: hand-written `[GeneratedComInterface]` is reliable here (decision D1 holds; no CsWin32 switch).**
+- Vtable order and arity of all 8 declared interfaces match the Windows SDK 26100 headers (`ExDisp.h`, `ShObjIdl_core.h`,
+  `servprov.h`, `oleidl.h`), checked mechanically: the probe parses each `*Vtbl` struct. The check itself needed one
+  fix (SAL annotations such as `__RPC__in_range(0,16384)` contain commas), which is why the production guard test must
+  strip annotations before counting.
+- Live calls pass for every method used: `get_Count`, `Item(VARIANT)`, `get_HWND` (frame), `QueryService` + `GetWindow`
+  (tab = `ShellTabWindowClass`), `QueryActiveShellView`, the `IFolderView` cast, `GetFolder`, `GetCurFolder`. The
+  `Variant` struct passed by value (24 bytes on x64) works.
+- **HRESULT behaviour (`[PreserveSig]`):** `Item` out of range returns **`S_FALSE` (1)** with a null out: any non-zero
+  result means "no item". `Item(VT_EMPTY)` returns `E_INVALIDARG`. Nothing throws.
+- **Casting:** `is`/`as`/explicit casts QI correctly; a cast to an interface the object lacks fails (`InvalidCastException`
+  for the explicit cast).
+- **Release (a correction to the earlier spec):** `ComObject.FinalRelease()` returns the raw proxy reference count to
+  its baseline (5 → 7 with the RCW and its QI'd interfaces → 5), after which any use throws `ObjectDisposedException`.
+  `Marshal.ReleaseComObject` and `FinalReleaseComObject` throw `ArgumentException` on these RCWs. One `ComObject` serves
+  all interfaces QI'd from one COM object, so one `FinalRelease()` per object is enough.
+- **A closed window's objects do not report a disconnect code.** After the frame closed: `get_HWND` and
+  `QueryActiveShellView` returned **`E_FAIL` (0x80004005)**, `GetWindow` still returned 0 (cached HWND). So `Gone` cannot
+  rely on `RPC_E_DISCONNECTED`: **`IsWindow(tabHwnd) == false` or `E_FAIL` on a tab whose window is gone ⇒ `Gone`**
+  (B.5/C amended below). The `RPC_E_*` codes stay in the table for a dead Explorer *process*, which the probe did not
+  exercise (D5).
+- Cost/leaks: 300 cycles of enumerate + read + release over 2 windows took 134 ms in total (≈0.45 ms a cycle); handles
+  306 → 310; managed heap flat.
+- Interop notes for the production code: `BSTR` out parameters need `[MarshalUsing(typeof(BStrStringMarshaller))]`;
+  `Span<char>`/`char[]` in `LibraryImport` need `DisableRuntimeMarshalling` (the app does not set it), so use `char*`
+  buffers.
+
+**P2: `CoCancelCall` works against an out-of-process COM proxy (scratch `LocalServer32` server blocking in
+`IPersist.GetClassID`; the registry key and processes are removed afterwards).**
+- With `CoEnableCallCancellation` on the calling STA thread, a watchdog's `CoCancelCall(tid, 0)` at ~250 ms made the
+  blocked call return **`RPC_E_CALL_CANCELED` (0x80010002) 0.2-2.4 ms later**; five more cancel cycles on the same
+  proxy returned in 0.2-0.4 ms and the proxy stayed usable. The same holds inside a message loop with a WinEvent hook.
+- **Without** `CoEnableCallCancellation`, `CoCancelCall` fails (`RPC_E_CANCEL_DISABLED` 0x80010140) and the call runs to
+  completion (6007 ms): enabling is mandatory, once per tracker thread.
+- **Limits of this evidence:** it proves cancel for a call through a COM proxy to another process, which is how the
+  tracker reaches Explorer. It does not prove Explorer itself behaves the same when genuinely hung; the abandon step
+  (1 s) stays as the backstop, and no text claims more (D4).
+- **WinEvent callbacks run on the thread while it waits in the outgoing call** (7 callbacks during a 257 ms call).
+  So callbacks are re-entrant with respect to the call, not merely delayed (corrects L3): callbacks must stay trivial
+  (flag + post). A thread message posted with `PostThreadMessage` was **not** dispatched during the wait, so the
+  evaluation handler itself is not re-entered, but its guard stays (cheap).
+- Side finding: an `IOleWindow` call into the scratch server returned `RPC_E_CANTCALLOUT_ININPUTSYNCCALL` at once and never
+  reached the server (`IOleWindow` methods are input-synchronous); not investigated further because Explorer's
+  `IOleWindow.GetWindow` works (P1). Plain ole32-proxied interfaces were used for the cancel test.
+
+**P3: path reads (route A = `GetCurFolder`; B = `LocationURL`; C = the S1 late-bound route, as the reference).**
+- A agrees with C on every case obtained: plain, Unicode (`Ünï 项目 📁`), known folder (`Downloads`), drive root, UNC admin
+  share (`\\localhost\C$\WINDOWS`), and the `.zip`.
+- Virtual folders: This PC, Home, Quick Access, Recycle Bin, Libraries all gave A = `null` (`SHGetNameFromIDList` →
+  `E_INVALIDARG`), where C gave the `::{GUID}` strings. Matches REQ-031's virtual-folder rule.
+- A **`.zip` folder reports the path of the `.zip` file** (L9, confirmed): the consumer must check it is a directory.
+- B failed on UNC (`\C$\WINDOWS`) and returns the same `null` for virtual folders, so it was dropped (§ E).
+- **Not obtained:** a *search-results* window (the `search-ms:` launch produced no tracked window within 6 s), a mapped
+  drive and an MTP device (none available). They remain listed in the T3.5 manual matrix; route A returns `null`
+  for anything `SHGetNameFromIDList` cannot turn into a file-system path.
+- **Cost:** route A median **0.36 ms** (max 1.6 ms) per read on a cached tab; one full typed enumeration of every tab
+  (`Item` + `get_HWND` + `QueryService` + `GetWindow`) **0.37 ms** for 2-3 windows. S1's late-bound figure was 34 ms. The
+  < 10 ms evaluation target has an order of magnitude of margin (to be re-measured end to end in T3.2.5).
+
+**P5: hook scoping.** Another process fired `NAMECHANGE`:
+| Source rate | No hook | Global hook | Hook scoped to Explorer's pid |
+|---|---|---|---|
+| 20/s | 0 callbacks | 172 callbacks / 10 s (≈17/s) | **0** |
+| 200/s | 0 | 633 / 10 s (≈63/s) | **0** |
+
+The global hook delivers other applications' events; the scoped one delivers none (decision D2's scoping holds).
+The delivered rates are well below the generated rates, direct evidence for L1 (events are dropped/coalesced under
+load). **The CPU cost could not be resolved**: the process's CPU clock ticks at 15.6 ms, so 0.156 % (one tick) to 0.000 %
+is noise at this rate. What is proven is that scoping removes the callbacks entirely; the idle-CPU budget is
+verified end to end in T3.2.5 and T3.5.
+
+**P4** (shell down, `rundll32` private server) is not run: it needs Explorer killed (D5). It stays open as O-24.
 
 ### Docking the panel (`PanelDocker`)
 

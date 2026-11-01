@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.1 tracker probes, after D1–D5 are answered (T3.2 spec done; T2.9 partial, see O-22)
+**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.2 pure logic (T3.2.1 probes done; T2.9 partial, see O-22)
 
 ---
 
@@ -47,6 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
+| T3.2.1 Tracker probes (S5) | ✅ | 2026-11-01 | this commit | P1 interop validated vs SDK headers, P2 `CoCancelCall` works on an out-of-process proxy, P3 one path route (0.36 ms), P5 scoped hooks remove foreign callbacks; P4 deferred (D5). Spec corrected (release API, `Gone` via `IsWindow`, `LocationURL` dropped) |
 | T3.1 Context menu verbs | ✅ | 2026-11-01 | `2772509` + this commit | ADR-024: installer-only registration, manual toggle + Repair in Settings, never automatic. Both live checks passed: Settings card by UIA (Off/On/Stale/Repair/forced failure) and the real Explorer menu (folder and background verbs, special-character path, unregister removes both) |
 
 Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until work on them begins.
@@ -59,7 +60,7 @@ Add a row when a task starts. Phases 2–6 are listed in `07-tasks.md` until wor
 | REQ-033 panel follows Explorer | no visible lag | 14 ms median / 34 ms max, 0 px | S2 | ✅ (spike) |
 | REQ-041 tooltip lookup | <20 ms | 0.13 ms median stub (58 ms first load) | S3 | ✅ (stub, no SQLite yet) |
 | REQ-060 rename/move tracking | survives | rename, move, ancestor rename all keep the ID | S4 | ✅ NTFS |
-| Tracker evaluation cost | <10 ms (from S1) | 34 ms avg with late binding | S1 | ❌ must fix in T3.2 (typed interop + cache) |
+| Tracker evaluation cost | <10 ms (from S1) | 34 ms avg with late binding (S1). Typed probe: path read 0.36 ms median, full enumeration of all tabs 0.37 ms | S1 / S5 | 🟡 components well under target; end-to-end re-measure in T3.2.5 |
 | REQ-051 search | <100 ms @ 10k | p95 8–54 ms over 10 query shapes (worst `due:30d`; typo fallback 30 ms), Debug build | T1.6 | ✅ |
 | REQ-051 search, Release | <100 ms @ 10k | p95 8.7–38.3 ms over the same 10 shapes (worst `due:30d`) | T2.6 | ✅ |
 | REQ-050 hotkey → palette | (no target) | ≈200 ms from the key press to the palette visible and focused (first open 243 ms, later 110–130 ms window time) | T2.6 | ✅ |
@@ -156,6 +157,18 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-01 (T3.2.1 probes, spike S5)
+- **Decisions D1–D5 recorded and committed (`596f97f`), ADR-025 accepted.** Added the user's safeguards to 04: validate every signature (CsWin32 on unreliability, no workarounds), bounded staleness without events (≤ 2 s via the poll), ordering/no-flicker/no-redundant-update rules, hard thread bounds (one tracker, ≤ 1 live + ≤ 3 abandoned threads, generation-gated publishing), elevated Explorer = no path and no retry loop.
+- **Probes (`spikes/S5-tracker-probes`, never shipped), results in 04 § H:**
+  - **P1** all 8 interfaces match the SDK 26100 vtables and arities (mechanically parsed from the headers), live calls and `VARIANT` work, casts behave. **Corrections found:** `Marshal.(Final)ReleaseComObject` throws on generated RCWs, the release is `ComObject.FinalRelease()`; a closed window's objects return `E_FAIL`, not a disconnect code; `Item` out of range is `S_FALSE`. CsWin32 switch not needed.
+  - **P2** `CoCancelCall` returned a blocked out-of-process call in 0.2–2.4 ms once `CoEnableCallCancellation` was on (the call otherwise ran its full 6 s). Shown on a scratch server, **not on Explorer**. WinEvent callbacks are dispatched to the thread while it waits in the call (7 in 257 ms), so re-entrancy is real; callbacks stay trivial.
+  - **P3** one route (`GetCurFolder`) matches the S1 late-bound result on every case obtained; virtual folders give `null`; a `.zip` reports the file path; `LocationURL` breaks UNC and was dropped. Cost 0.36 ms per read. Not obtained: search results, mapped drive, MTP.
+  - **P5** a global `NAMECHANGE` hook delivered 172 (20/s source) and 633 (200/s) callbacks per 10 s, the process-scoped hook 0. CPU could not be resolved (timer tick 15.6 ms). The delivery rates also show events being dropped under load (L1).
+  - **P4** not run (needs Explorer killed; D5). O-24 stays open.
+- **Probe-code bugs, not findings:** the cancel server first hung because `[STAThread]` Main made the "MTA" server STA; `IOleWindow` is input-synchronous and unusable in the scratch server; `SetWindowText` on a hidden STATIC raises no `NAMECHANGE` (used `NotifyWinEvent`). A timeout once left a scratch server and its HKCU CLSID key behind; both were removed and the probe now cleans up in `finally`.
+- **Housekeeping:** the probes opened Explorer windows and closed only their own (one pre-existing window of yours was not touched); no FolderNotes process, registry key or `rundll32` left.
+- **Next:** T3.2.2 pure logic and tests.
 
 ### 2026-11-01 (T3.2 specification, no code)
 - **Specs written first, no implementation:** 04 § ExplorerTracker design (A–G: structure, COM interop, tab cache, coalescing, path reading, reliability/recovery, Windows/COM limits L1–L12; replaces the old step list and the "debounced to 50 ms" line); 04 § 4.4 and 02 (`IExplorerTracker` now has `Current`, `Start`/`Stop`, `NotifyShellRestarted`, `GetStats`; event is `{FrameHwnd, TabHwnd, Path?, Sequence}`, no `RECT`); 06 § ExplorerTracker tests; 07 T3.2 split into T3.2.1–T3.2.5; ADR-025 (*proposed*); ADR-004 marked partly superseded; O-23, O-24 and decisions D1–D5 above.

@@ -420,3 +420,12 @@ D4 cancel/abandon/breaker accepted with hard bounds (one tracker, bounded thread
 no claim of safe COM cancellation without probe evidence. D5 no Explorer kill on the dev desktop (disposable VM only;
 O-24 stays open). Elevated Explorer unsupported in v1 (no crash, no retry loop). No live monitor before T3.4;
 `GetStats()` and test fixtures are the diagnostics.
+
+**Probe results (T3.2.1, 2026-11-01; details in 04 § H):** D1 holds, hand-written interfaces match the SDK headers and work
+live, with two corrections to this ADR's first draft: release is `ComObject.FinalRelease()` (not
+`Marshal.FinalReleaseComObject`, which throws), and a closed window's objects return `E_FAIL`, so `Gone` also uses
+`IsWindow`. Point 7 changes: **one** path route (`GetCurFolder`); `LocationURL` is dropped because it breaks UNC paths. D4:
+`CoCancelCall` cancels a blocked call through an out-of-process proxy in under 3 ms once `CoEnableCallCancellation` is
+on, shown against a scratch server, not Explorer. WinEvent callbacks run during the wait (re-entrancy is real, handled
+by trivial callbacks). Scoping the hook to Explorer's process removes all foreign callbacks. P4 and the real restart stay
+open (D5, O-24).

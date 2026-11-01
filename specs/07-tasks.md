@@ -279,7 +279,7 @@ smoke tests pass.
 - [ ] **T3.2 🧱 ExplorerTracker service** (REQ-031, 034, NFR-01, NFR-06), production version of S1.
   Design: 04 § ExplorerTracker design, ADR-025. Not wired to the UI until T3.4. Done in five steps, in order;
   T3.2 is ticked when all five are:
-  - [ ] **T3.2.1 🔬 Probes** (spike `spikes/S5-tracker-probes`, never shipped; findings go into 04 and ADR-025):
+  - [x] **T3.2.1 🔬 Probes** *(done 2026-11-01: P1, P2, P3, P5 passed or measured, P4 deferred by D5; results in 04 § H, ADR-025 updated, no spec failure that needs CsWin32)* (spike `spikes/S5-tracker-probes`, never shipped; findings go into 04 and ADR-025):
     **P1** every interface and method signature in 04 B.1 is validated (vtable order vs SDK headers and a live call
     per method, `VARIANT` index, `HRESULT` handling, `QueryInterface`/casting, RCW lifetime and release); on
     unreliability switch to CsWin32, no workarounds (decision D1); **P2** `CoCancelCall` returns a blocked
