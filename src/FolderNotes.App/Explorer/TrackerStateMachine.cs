@@ -10,8 +10,35 @@ internal enum TrackerState
     /// <summary>The shell is gone or its root object is wrong: waiting to recreate it (04 F).</summary>
     Recovering,
 
+    /// <summary>
+    /// A worker was abandoned and its server is unresolved (04 § M): tracking is suspended for every Explorer window. No worker
+    /// runs, except one trial worker (<see cref="QuarantinePhase.Trial"/>).
+    /// </summary>
+    Quarantined,
+
     /// <summary>Latched off by the circuit breaker or the thread cap; only <see cref="TrackerStateMachine.Retry"/> leaves it.</summary>
     Disabled,
+}
+
+/// <summary>The sub-state of <see cref="TrackerState.Quarantined"/> (04 § M.6).</summary>
+internal enum QuarantinePhase
+{
+    None,
+
+    /// <summary>No worker; the monitor looks for evidence every second.</summary>
+    Waiting,
+
+    /// <summary>One trial worker runs; the quarantine record is still in force until it passes (04 § M.5).</summary>
+    Trial,
+}
+
+internal enum TrialKind
+{
+    /// <summary>Started by the monitor after a complete health hold, at most once per suspect server.</summary>
+    Automatic,
+
+    /// <summary>Started by the user's Retry while no hang evidence is seen.</summary>
+    Explicit,
 }
 
 internal enum DisabledReason
@@ -21,9 +48,36 @@ internal enum DisabledReason
     ThreadCap,
 }
 
+/// <summary>What the user is told (04 § M.7). One value per situation the Settings card must tell apart.</summary>
+internal enum TrackerAvailability
+{
+    Stopped,
+
+    /// <summary>Running normally.</summary>
+    Tracking,
+
+    /// <summary>The shell is down or restarting (04 F): resumes by itself.</summary>
+    TemporarilyUnavailable,
+
+    /// <summary>Waiting for evidence that an unresponsive Explorer recovered (04 § M).</summary>
+    Quarantined,
+
+    /// <summary>A trial worker is trying again.</summary>
+    RecoveryAttempt,
+
+    /// <summary>The circuit breaker tripped: Retry offered.</summary>
+    Paused,
+
+    /// <summary>The lifetime thread cap is used up: off until the app restarts, no Retry.</summary>
+    PermanentlyOff,
+}
+
 internal enum StartResult
 {
     Started,
+
+    /// <summary>Started, but an unresolved quarantine is in force (04 § M.6 Q17): hooks and monitor run, no worker yet.</summary>
+    Quarantined,
 
     /// <summary>Another tracker is active in this process (04 B.6: at most one).</summary>
     AnotherTrackerActive,
@@ -37,23 +91,49 @@ internal enum StartResult
 
 internal enum RetryResult
 {
+    /// <summary>A normal worker was started (no quarantine in force).</summary>
     Started,
+
+    /// <summary>An explicit trial worker was started; the quarantine stays in force until it passes (04 § M.6 Q21/Q22).</summary>
+    TrialStarted,
+
     NotDisabled,
 
     /// <summary>The lifetime thread cap is reached: stays disabled until the app restarts.</summary>
     ThreadCapReached,
+
+    /// <summary>A trial worker is already running (at most one at a time).</summary>
+    TrialInProgress,
+
+    /// <summary>A suspect server shows hang evidence right now: a trial would hit the same frozen server.</summary>
+    ServerNotResponding,
 }
 
 internal enum WedgeOutcome
 {
-    /// <summary>Start exactly one replacement worker with the returned generation.</summary>
-    StartReplacement,
+    /// <summary>No replacement: the tracker is quarantined until there is evidence (04 § M).</summary>
+    Quarantined,
 
-    /// <summary>Do not start a worker; the machine is now Disabled.</summary>
+    /// <summary>The breaker or the cap latched the tracker off.</summary>
     Disabled,
 }
 
 internal readonly record struct WedgeDecision(WedgeOutcome Outcome, int Generation, DisabledReason Reason);
+
+/// <summary>What the monitor must do after one look (04 § M.6).</summary>
+internal enum QuarantineAction
+{
+    None,
+
+    /// <summary>Every entry resolved while Waiting: start one normal worker (its slot is already reserved).</summary>
+    StartWorker,
+
+    /// <summary>An automatic trial was granted: start the trial worker (its slot is already reserved).</summary>
+    StartTrial,
+
+    /// <summary>The trial reached its deadline without evidence: stop it, then report <see cref="TrackerStateMachine.TrialStopped"/>.</summary>
+    StopTrial,
+}
 
 internal sealed record TrackerLimits
 {
@@ -123,7 +203,16 @@ internal sealed class TrackerProcessGuard
     private int _abandoned;
     private int _abandonedHook;
 
-    public TrackerProcessGuard(TrackerThreadBudget? budget = null) => _budget = budget ?? TrackerThreadBudget.Default;
+    public TrackerProcessGuard(TrackerThreadBudget? budget = null, QuarantineRecord? quarantine = null)
+    {
+        _budget = budget ?? TrackerThreadBudget.Default;
+        Quarantine = quarantine ?? new QuarantineRecord();
+    }
+
+    /// <summary>
+    /// The quarantine record (04 § M): process-wide like the cap, so Stop/Start and a new tracker instance cannot bypass it.
+    /// </summary>
+    public QuarantineRecord Quarantine { get; }
 
     public static TrackerProcessGuard Shared { get; } = new();
 
@@ -240,20 +329,21 @@ internal sealed class TrackerProcessGuard
 }
 
 /// <summary>
-/// Lifecycle rules of 04 § ExplorerTracker design B.6 and F as a pure state machine: Stopped → Running ⇄ Recovering,
-/// wedge → replacement or Disabled, the breaker, the thread limits and the recovery back-off. It never starts a
-/// thread itself; it tells the host what is allowed.
+/// Lifecycle rules of 04 § ExplorerTracker design B.6, F and M as a pure state machine: Stopped → Running ⇄ Recovering,
+/// wedge → Quarantined (Waiting ⇄ Trial) → Running, or Disabled by the breaker or the cap. It never starts a thread itself;
+/// it tells the host what is allowed and reserves the worker slot first.
 /// <para>
-/// Thread limits: <see cref="LiveWorkers"/> is 0 or 1 (a second worker is refused with an exception), the cap on
-/// abandoned threads is process-wide, and <see cref="OnWedge"/> invalidates the publisher's generation (publishing
-/// Inactive) <i>before</i> it returns a replacement, so an abandoned worker can never publish.
+/// Thread limits: <see cref="LiveWorkers"/> is 0 or 1 (a trial and a normal worker share the one slot), the cap on abandoned
+/// threads and the quarantine record are process-wide, and <see cref="OnWedge"/> invalidates the publisher's generation
+/// (publishing Inactive) before anything else, so an abandoned worker can never publish.
 /// </para>
 /// </summary>
 internal sealed class TrackerStateMachine
 {
-    // Thread safety: the worker thread (recovery), the watchdog thread (OnWedge) and the UI thread (Start/Stop/Retry) all call
-    // this. Every mutating method is [Synchronized] (locks this; the machine is never exposed outside the tracker), and the
-    // state properties are single enum/int reads, atomic on x64. It calls StatePublisher (its own lock) but is never called back by it.
+    // Thread safety: the worker thread (recovery), the watchdog thread (OnWedge, the monitor) and the UI thread (Start/Stop/Retry)
+    // all call this. Every mutating method is [Synchronized] (locks this; the machine is never exposed outside the tracker), and
+    // the state properties are single enum/int reads, atomic on x64. It calls StatePublisher and QuarantineRecord (their own
+    // locks) but neither calls back, so the lock order is always machine → publisher/record.
     private static readonly TimeSpan[] RecoveryDelays =
         [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)];
 
@@ -265,6 +355,8 @@ internal sealed class TrackerStateMachine
     private readonly StatePublisher _publisher;
     private readonly Queue<long> _wedges = new();
     private int _recoveryAttempt;
+    private long _trialStartedAt;
+    private long _trialBaseline;
 
     public TrackerStateMachine(TimeProvider clock, StatePublisher publisher, TrackerProcessGuard guard, TrackerLimits? limits = null)
     {
@@ -280,8 +372,17 @@ internal sealed class TrackerStateMachine
 
     public DisabledReason DisabledReason { get; private set; }
 
+    /// <summary>Only meaningful while <see cref="TrackerState.Quarantined"/>.</summary>
+    public QuarantinePhase Phase { get; private set; }
+
+    /// <summary>The kind of the running trial (meaningful while <see cref="Phase"/> is Trial).</summary>
+    public TrialKind TrialKind { get; private set; }
+
     /// <summary>Worker threads currently serving the tracker: 0 or 1.</summary>
     public int LiveWorkers { get; private set; }
+
+    /// <summary>The process-wide quarantine record (04 § M).</summary>
+    public QuarantineRecord Quarantine => _guard.Quarantine;
 
     public int WedgesInWindow
     {
@@ -295,7 +396,20 @@ internal sealed class TrackerStateMachine
         }
     }
 
-    /// <summary>Stopped → Running. The host then starts the one worker.</summary>
+    /// <summary>What the user is told (04 § M.7).</summary>
+    public TrackerAvailability Availability => State switch
+    {
+        TrackerState.Running => TrackerAvailability.Tracking,
+        TrackerState.Recovering => TrackerAvailability.TemporarilyUnavailable,
+        TrackerState.Quarantined => Phase == QuarantinePhase.Trial ? TrackerAvailability.RecoveryAttempt : TrackerAvailability.Quarantined,
+        TrackerState.Disabled => DisabledReason == DisabledReason.ThreadCap ? TrackerAvailability.PermanentlyOff : TrackerAvailability.Paused,
+        _ => TrackerAvailability.Stopped,
+    };
+
+    /// <summary>
+    /// Stopped → Running, or → Quarantined.Waiting when the process-wide record is unresolved (04 § M.6 Q17/Q18; the host checks
+    /// E1/E2 just before). The host then starts the one worker only for <see cref="StartResult.Started"/>.
+    /// </summary>
     [MethodImpl(MethodImplOptions.Synchronized)]
     public StartResult Start()
     {
@@ -303,7 +417,7 @@ internal sealed class TrackerStateMachine
         {
             case TrackerState.Disabled:
                 return StartResult.Disabled;
-            case TrackerState.Running or TrackerState.Recovering:
+            case TrackerState.Running or TrackerState.Recovering or TrackerState.Quarantined:
                 return StartResult.AlreadyRunning;
         }
 
@@ -315,6 +429,14 @@ internal sealed class TrackerStateMachine
         if (!_guard.TryAcquire(this))
         {
             return StartResult.AnotherTrackerActive;
+        }
+
+        if (_guard.Quarantine.HasUnresolved)
+        {
+            State = TrackerState.Quarantined;              // Stop/Start and new instances meet the same record (Q17)
+            Phase = QuarantinePhase.Waiting;
+            _guard.Quarantine.RestartHold();               // a full hold is needed again: nobody watched while stopped
+            return StartResult.Quarantined;
         }
 
         if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
@@ -329,8 +451,9 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>
-    /// Any state → Stopped (a Disabled tracker stays Disabled and keeps the process slot: the latch is not an
-    /// escape hatch, and no second tracker may start in its place), publishes Inactive, and frees the process slot otherwise. The host ends the worker (bounded wait).
+    /// Any state → Stopped (a Disabled tracker stays Disabled and keeps the process slot: the latch is not an escape hatch,
+    /// and no second tracker may start in its place), publishes Inactive, and frees the process slot otherwise. The quarantine
+    /// record is kept (Q15/Q16). The host ends the worker (bounded wait).
     /// </summary>
     [MethodImpl(MethodImplOptions.Synchronized)]
     public void Stop(bool workerAbandoned = false)
@@ -350,6 +473,7 @@ internal sealed class TrackerStateMachine
 
         LiveWorkers = 0;
         _recoveryAttempt = 0;
+        Phase = QuarantinePhase.None;
         _publisher.PublishInactive();
         if (State == TrackerState.Disabled)
         {
@@ -366,7 +490,7 @@ internal sealed class TrackerStateMachine
     {
         if (State != TrackerState.Running)
         {
-            return; // already recovering, stopped, or disabled
+            return; // already recovering, quarantined (a trial recovers inside its engine), stopped, or disabled
         }
 
         State = TrackerState.Recovering;
@@ -394,15 +518,18 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>
-    /// The watchdog abandoned the worker. Invalidates the generation first (publishing Inactive), counts the
-    /// abandoned thread, then either allows exactly one replacement or disables the tracker.
+    /// The watchdog abandoned the live worker (a normal or a trial worker). Invalidates the generation first (publishing
+    /// Inactive), counts the abandoned thread and the wedge, records <paramref name="entry"/> in the process-wide record, and
+    /// then: <c>ThreadCap</c> &gt; <c>CircuitBreaker</c> &gt; <c>Quarantined</c> (04 § M.6 Q1–Q3, Q10). <b>Never</b> a replacement.
     /// </summary>
     [MethodImpl(MethodImplOptions.Synchronized)]
-    public WedgeDecision OnWedge()
+    public WedgeDecision OnWedge(QuarantineEntry entry)
     {
-        if (State is not (TrackerState.Running or TrackerState.Recovering) || LiveWorkers != 1)
+        ArgumentNullException.ThrowIfNull(entry);
+        bool trial = State == TrackerState.Quarantined && Phase == QuarantinePhase.Trial;
+        if (!(State is TrackerState.Running or TrackerState.Recovering || trial) || LiveWorkers != 1)
         {
-            throw new InvalidOperationException("A wedge can only be reported for the live worker of a running tracker.");
+            throw new InvalidOperationException("A wedge can only be reported for the live worker of a running tracker or a trial.");
         }
 
         int generation = _publisher.Abandon();
@@ -412,6 +539,7 @@ internal sealed class TrackerStateMachine
         var now = _clock.GetTimestamp();
         Expire();
         _wedges.Enqueue(now);
+        _guard.Quarantine.Add(entry);                      // recorded in every outcome (Q1, Q2 keep it for Retry)
 
         // The permanent reason wins when both limits are reached by the same wedge (04 B.6), so the UI can tell
         // "Retry may work" (CircuitBreaker) from "off until the app restarts" (ThreadCap).
@@ -429,46 +557,145 @@ internal sealed class TrackerStateMachine
         {
             State = TrackerState.Disabled;
             DisabledReason = r;
+            Phase = QuarantinePhase.None;
             return new WedgeDecision(WedgeOutcome.Disabled, generation, r);
         }
 
-        return new WedgeDecision(WedgeOutcome.StartReplacement, generation, Explorer.DisabledReason.None);
+        State = TrackerState.Quarantined;
+        Phase = QuarantinePhase.Waiting;
+        return new WedgeDecision(WedgeOutcome.Quarantined, generation, Explorer.DisabledReason.None);
     }
 
-    /// <summary>The host started the replacement worker. Refused if one is already live (thread limit).</summary>
+    /// <summary>
+    /// One look of the monitor (04 § M.6), with the record's assessment and the current count of full enumerations (trial
+    /// evidence). Reserves the worker slot itself before it answers <see cref="QuarantineAction.StartWorker"/> or
+    /// <see cref="QuarantineAction.StartTrial"/>.
+    /// </summary>
     [MethodImpl(MethodImplOptions.Synchronized)]
-    public void ReplacementStarted()
+    public QuarantineAction OnQuarantineTick(QuarantineAssessment assessment, long fullEnumerations)
     {
-        if (State is not (TrackerState.Running or TrackerState.Recovering))
+        if (State != TrackerState.Quarantined)
         {
-            throw new InvalidOperationException("No replacement is allowed in this state.");
+            return QuarantineAction.None;                  // Disabled/Stopped: the record resolves silently (Q14), no restart
         }
 
-        if (LiveWorkers != 0)
+        if (assessment.AllResolved)
         {
-            throw new InvalidOperationException("A worker is already live; at most one is allowed.");
+            if (Phase == QuarantinePhase.Trial)
+            {
+                EndQuarantine();                            // Q11: the trial worker becomes the normal worker
+                return QuarantineAction.None;
+            }
+
+            if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
+            {
+                return QuarantineAction.None;              // defensive: the slot is free while Waiting
+            }
+
+            EndQuarantine();                                // Q4
+            LiveWorkers = 1;
+            return QuarantineAction.StartWorker;
         }
 
-        if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
+        if (Phase == QuarantinePhase.Trial)
         {
-            throw new InvalidOperationException("The process thread budget refuses another live worker.");
+            if (_clock.GetElapsedTime(_trialStartedAt) < _guard.Quarantine.Options.TrialDeadline)
+            {
+                return QuarantineAction.None;
+            }
+
+            if (fullEnumerations > _trialBaseline)
+            {
+                _guard.Quarantine.ClearByTrial();           // Q8: passed; the record is cleared only now
+                EndQuarantine();
+                return QuarantineAction.None;
+            }
+
+            return QuarantineAction.StopTrial;             // Q9: inconclusive
         }
 
-        LiveWorkers = 1;
+        if (assessment.HoldComplete && assessment.AutomaticTrialAllowed && TryStartTrial(TrialKind.Automatic, fullEnumerations))
+        {
+            return QuarantineAction.StartTrial;            // Q5
+        }
+
+        return QuarantineAction.None;                      // Q6, Q7
     }
 
-    /// <summary>The user's explicit Retry (Settings, T3.4): the only way out of Disabled, and only below the thread cap.</summary>
+    /// <summary>
+    /// The host stopped an inconclusive trial worker and it ended in time (Q9). Its generation is invalidated (Inactive) and the
+    /// state returns to Waiting; another complete hold is needed. A trial that did not end is reported through <see cref="OnWedge"/>.
+    /// </summary>
     [MethodImpl(MethodImplOptions.Synchronized)]
-    public RetryResult Retry()
+    public void TrialStopped()
     {
+        if (State != TrackerState.Quarantined || Phase != QuarantinePhase.Trial || LiveWorkers != 1)
+        {
+            throw new InvalidOperationException("No trial worker is running.");
+        }
+
+        _publisher.Abandon();
+        _guard.ReleaseThread(TrackerThreadKind.Worker);
+        LiveWorkers = 0;
+        Phase = QuarantinePhase.Waiting;
+        _guard.Quarantine.RestartHold();
+    }
+
+    /// <summary>
+    /// The user's explicit Retry (Settings, T3.4), 04 § M.6 Q19–Q24. <paramref name="hangEvidence"/> is the record's hang evidence
+    /// right now; <paramref name="fullEnumerations"/> the trial baseline. Never clears the record, never resets the cap.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
+    public RetryResult Retry(bool hangEvidence = false, long fullEnumerations = 0)
+    {
+        if (State == TrackerState.Quarantined)
+        {
+            if (Phase == QuarantinePhase.Trial)
+            {
+                return RetryResult.TrialInProgress;        // Q20: one trial at a time
+            }
+
+            if (_guard.AbandonedThreads >= _limits.MaxAbandonedThreads)
+            {
+                return RetryResult.ThreadCapReached;
+            }
+
+            if (hangEvidence)
+            {
+                return RetryResult.ServerNotResponding;    // Q21
+            }
+
+            return TryStartTrial(TrialKind.Explicit, fullEnumerations) ? RetryResult.TrialStarted : RetryResult.ThreadCapReached;
+        }
+
         if (State != TrackerState.Disabled)
         {
-            return RetryResult.NotDisabled;
+            return RetryResult.NotDisabled;                // Q19
         }
 
         if (_guard.AbandonedThreads >= _limits.MaxAbandonedThreads)
         {
-            return RetryResult.ThreadCapReached;
+            return RetryResult.ThreadCapReached;           // Q24 (and a breaker trip that also used up the cap)
+        }
+
+        if (_guard.Quarantine.HasUnresolved)
+        {
+            if (hangEvidence)
+            {
+                return RetryResult.ServerNotResponding;    // Q22: the breaker window is kept
+            }
+
+            // Q22: the breaker window is cleared (Q1 rule) and the retry is an explicit trial against the unresolved server.
+            _wedges.Clear();
+            DisabledReason = Explorer.DisabledReason.None;
+            State = TrackerState.Quarantined;
+            Phase = QuarantinePhase.Waiting;
+            if (TryStartTrial(TrialKind.Explicit, fullEnumerations))
+            {
+                return RetryResult.TrialStarted;
+            }
+
+            return RetryResult.ThreadCapReached;           // defensive: cannot happen below the cap with the slot free
         }
 
         if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
@@ -476,7 +703,7 @@ internal sealed class TrackerStateMachine
             return RetryResult.ThreadCapReached; // defensive; cannot happen while the slot is free
         }
 
-        // The lifetime abandoned count is deliberately NOT touched: Retry buys one more cycle, not new budget.
+        // Q23. The lifetime abandoned count is deliberately NOT touched: Retry buys one more cycle, not new budget.
         _wedges.Clear();
         DisabledReason = Explorer.DisabledReason.None;
         State = TrackerState.Running;
@@ -490,8 +717,36 @@ internal sealed class TrackerStateMachine
     /// </summary>
     public bool IsPermanentlyDisabled => State == TrackerState.Disabled && DisabledReason == DisabledReason.ThreadCap;
 
-    /// <summary>True when the Retry action would be accepted right now (what Settings uses to show the button).</summary>
-    public bool CanRetry => State == TrackerState.Disabled && _guard.AbandonedThreads < _limits.MaxAbandonedThreads;
+    /// <summary>True when Settings should offer Retry: paused by the breaker, or quarantined with no trial running, below the cap.</summary>
+    public bool CanRetry =>
+        _guard.AbandonedThreads < _limits.MaxAbandonedThreads
+        && (State == TrackerState.Disabled || (State == TrackerState.Quarantined && Phase == QuarantinePhase.Waiting));
+
+    /// <summary>Called under the lock: Waiting → Trial with the one worker slot reserved and every suspect marked tried (04 § M.5).</summary>
+    private bool TryStartTrial(TrialKind kind, long fullEnumerations)
+    {
+        if (State != TrackerState.Quarantined || Phase != QuarantinePhase.Waiting || LiveWorkers != 0
+            || _guard.AbandonedThreads >= _limits.MaxAbandonedThreads
+            || !_guard.TryReserveThread(TrackerThreadKind.Worker))
+        {
+            return false;
+        }
+
+        _guard.Quarantine.MarkTried();                     // starting a trial never clears the record
+        Phase = QuarantinePhase.Trial;
+        TrialKind = kind;
+        LiveWorkers = 1;
+        _trialStartedAt = _clock.GetTimestamp();
+        _trialBaseline = fullEnumerations;
+        return true;
+    }
+
+    private void EndQuarantine()
+    {
+        State = TrackerState.Running;
+        Phase = QuarantinePhase.None;
+        _recoveryAttempt = 0;
+    }
 
     private void Expire()
     {

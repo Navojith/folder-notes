@@ -301,7 +301,7 @@ smoke tests pass.
     recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
     `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
     pass; `AppShell`/`App.xaml.cs` do not start it (guard test).
-  - [ ] **T3.2.6 🧱 Frozen-server quarantine** (NFR-01; 04 § M, ADR-025 amendment 2026-11-03; user decision 1). Built in
+  - [x] **T3.2.6 🧱 Frozen-server quarantine** *(done 2026-11-03; as-built notes 04 § M.12; real verification is VM plan stage D)* (NFR-01; 04 § M, ADR-025 amendment 2026-11-03; user decision 1). Built in
     increments, each with deterministic tests: (1) `CallJournal` + gateway/engine operations + cancel HRESULT; (2) the pure
     `QuarantineRecord` (entries, suspects, evidence, same-server trial budget) and the state machine's Q1–Q24; (3) the monitor
     on the watchdog thread, the Win32 server probe and supervisor integration (no replacement on a wedge, trials, release);

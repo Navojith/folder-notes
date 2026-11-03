@@ -730,11 +730,14 @@ the owned-at-once maximum stays 10. (e) *One tracker per process:* unchanged. A 
 **M.9 Hang pre-screen (depends on P7).** Before a `PathRead`, if `IsHungAppWindow(frame)` is true, return `Transient` without calling
 (retry ladder, § D.4). Before an enumeration, if any Explorer frame is hung, defer it (`Transient`). This avoids a wedge, and therefore
 an abandoned worker, for a window that has already been hung for more than 5 s (the Windows threshold). It cannot catch a freeze younger
-than that.
+than that. *Built (T3.2.6):* the same check also defers a worker's **first connection** (`CoCreateInstance` + enumeration at start or
+in recovery) to the recovery back-off, because that connection enumerates every Explorer process too. While that lasts, a running
+worker reports `Recovering` (availability `TemporarilyUnavailable`). Skipped calls are counted (`PreScreened`). `IWin32Shell` gains
+`IsHung(hwnd)` and `AnyExplorerFrameHung()` (frames and the shell window).
 
 **M.10 Observability.** `TrackerStats`: `Availability`, `QuarantineEpisodes`, unresolved entries (site, suspect kind and pid, age),
 releases by E1, E2 and passed trial, trials started (automatic/explicit), passed, inconclusive and wedged, `LastCancelHr`,
-`LastWedgeSite`, `JournalDefects`. Logged once at each entry and release.
+`LastWedgeSite`, `JournalDefects`, `FullEnumerations`, `PreScreened`. Logged once at each entry and release.
 
 **M.11 Tests.** Deterministic, with a fake clock and a fake server probe: every row Q1–Q24; the same-server rule; at most one automatic
 trial per server; holds that restart on hang evidence; the 30 s minimum; pid reuse is not E1/E2; journal sequence-lock torn reads are
@@ -742,6 +745,25 @@ indeterminate; a stale or dangling record is never active; the cancel HRESULT ne
 instance; the cap and live-worker limit hold across trial loops (a model test that drives random event sequences and asserts M.8 after
 each step). Timing: supervisor + watchdog with a blocking fake gateway (no worker while Waiting; release ≤ 1.5 s after the block ends;
 trial deadline). Real, **VM only**: VM plan stage D.
+
+**M.12 Interpretations fixed while building it (T3.2.6, 2026-11-03).**
+- *The machine records the entry.* `OnWedge(entry)` adds the entry to the record inside the machine's lock, in every outcome (Q1–Q3),
+  so no monitor look can see a quarantined state without its entry.
+- *A worker that does not start in time* (its first connection hung) is one wedge and **nothing more**: the earlier "create another
+  one until the breaker stops it" loop is gone (rule 4).
+- *An inconclusive trial that stopped cleanly* (`TrialStopped`) also bumps the generation and publishes `Inactive`: the trial may have
+  published, and quarantine means "no folder shown".
+- *Start after Stop* restarts the hold from zero (Q17). The supervisor runs one E1/E2 assessment just before `Start` decides.
+- *The monitor keeps looking while `Disabled (CircuitBreaker)`* with unresolved entries (still 1 s, still Win32-only), so the record
+  can clear by itself (Q14). It stops with the watchdog when the tracker is stopped. With nothing unresolved it does not run.
+- *A process that cannot be opened* (access denied) is treated as **running** and never as ended: a false E2 would release a
+  quarantine. The cost is that E2 cannot resolve such a suspect, so it waits for E1 or a trial.
+- *Publishing `Inactive` while already inactive is suppressed* (no event), as for every no-op publish (§ D.6).
+- *Journal levels.* The engine's operations are `RootCreate`, `Enumerate` (target = shell), `PathRead` (target = the frame's
+  process), `Release` (map sweeps/drops, root disposal). The gateway's per-item `ItemProbe`/`ItemRead` nest inside `Enumerate`. A
+  third level never occurs in the code; if it did, it would be counted as a defect.
+- *Evidence for a trial* is the count of validated full enumerations (`TryConnect` success, or a `Rebuild` that answered). The trial
+  passes if that count grew between its start and its deadline.
 
 #### K. Interpretations fixed while building the COM layer and thread hosts (T3.2.3, 2026-11-03)
 

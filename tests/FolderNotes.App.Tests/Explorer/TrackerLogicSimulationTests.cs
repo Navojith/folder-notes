@@ -420,7 +420,7 @@ public class TrackerLogicSimulationTests
     // ---- abandoned worker -----------------------------------------------------------------------------
 
     [Fact]
-    public void NFR01_A_wedged_worker_is_replaced_and_its_late_result_never_reaches_the_UI()
+    public void NFR01_A_wedged_worker_is_quarantined_and_its_late_result_never_reaches_the_UI()
     {
         var rig = OneFrame();
         rig.Signal(SignalKinds.Foreground);
@@ -428,16 +428,16 @@ public class TrackerLogicSimulationTests
         int zombieGeneration = rig.Generation;
         long zombieSeq = rig.Publisher.NextSequence();    // the doomed worker started an evaluation...
 
-        var wedge = rig.Machine.OnWedge();                // ...and the watchdog gave up on it
+        var wedge = rig.Machine.OnWedge(TestEntries.Unknown(new FakeZombie(), rig.Clock));   // ...and the watchdog gave up on it
         rig.Delivered[^1].IsInactive.ShouldBeTrue();
-        rig.Machine.ReplacementStarted();
+        rig.Machine.Retry().ShouldBe(RetryResult.TrialStarted);   // the next worker (a trial, 04 § M.5)
         rig.World.Navigate(1, @"C:\fresh");
 
         // the zombie finally returns with what it read long ago
         rig.Publisher.TryPublish(zombieGeneration, zombieSeq, new ActiveFolderState(1, 11, @"C:\stale", 0))
             .ShouldBe(PublishResult.StaleGeneration);
 
-        // the replacement serves the same signal from an empty cache
+        // the trial worker serves the same signal from an empty cache
         rig.Map.Clear();
         rig.AdoptGeneration(wedge.Generation);
         rig.Signal(SignalKinds.Foreground);

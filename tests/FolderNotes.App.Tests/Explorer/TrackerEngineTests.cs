@@ -37,6 +37,9 @@ internal sealed class EngineRig : IDisposable
 
     public List<string> Log { get; } = [];
 
+    /// <summary>The journal of the current engine (04 § M.2).</summary>
+    public CallJournal Journal { get; private set; } = null!;
+
     public EngineRig(int? generationOverride = null)
     {
         Publisher = new StatePublisher(Delivered.Add);
@@ -45,8 +48,11 @@ internal sealed class EngineRig : IDisposable
         Engine = NewEngine(generationOverride ?? Publisher.Generation);
     }
 
-    public TrackerEngine NewEngine(int generation) =>
-        new(generation, Desk, Desk, Publisher, Machine, Scope, Counters, Clock, null, Log.Add);
+    public TrackerEngine NewEngine(int generation)
+    {
+        Journal = new CallJournal(generation, Clock);
+        return new(generation, Desk, Desk, Publisher, Machine, Scope, Counters, Clock, null, Log.Add, Journal);
+    }
 
     /// <summary>Runs the loop for <paramref name="ms"/> of fake time, one millisecond per step.</summary>
     public void Pump(int ms)
@@ -524,7 +530,7 @@ public sealed class TrackerEngineTests : IDisposable
         var scope = new GenerationScope(_r.Publisher.Generation, _r.Publisher, inner);
 
         scope.SetScope(500).ShouldBeTrue();
-        _r.Machine.OnWedge();                                    // the generation moves on
+        _r.Machine.OnWedge(TestEntries.Unknown(new FakeZombie(), _r.Clock));   // the generation moves on
         scope.SetScope(777).ShouldBeFalse();
 
         inner.Requests.ShouldBe([500u]);
@@ -539,8 +545,8 @@ public sealed class TrackerEngineTests : IDisposable
         _r.Delivered.Count.ShouldBe(1);
         var zombie = _r.Engine;
 
-        _r.Machine.OnWedge();                                    // the watchdog abandoned it: generation bumped, Inactive published
-        _r.Machine.ReplacementStarted();
+        _r.Machine.OnWedge(TestEntries.Unknown(new FakeZombie(), _r.Clock));   // the watchdog abandoned it: generation bumped, Inactive published
+        _r.Machine.Retry().ShouldBe(RetryResult.TrialStarted);   // the next worker is a trial (04 § M.5)
         int afterWedge = _r.Delivered.Count;
         _r.Desk.Navigate(1, @"C:\zombie");
         zombie.OnSignals(TrackerSignal.NameChange);
@@ -554,5 +560,124 @@ public sealed class TrackerEngineTests : IDisposable
         for (int i = 0; i < 20; i++) { replacement.Tick(); _r.Clock.Advance(TimeSpan.FromMilliseconds(5)); }
         _r.Delivered[^1].Path.ShouldBe(@"C:\zombie");            // the replacement publishes the truth
         replacement.Dispose();
+    }
+
+    // ---- call journal (04 § M.2) -------------------------------------------------------------------------
+
+    [Fact]
+    public void NFR01_M2_Every_gateway_call_runs_inside_an_operation_that_names_its_target()
+    {
+        var seen = new List<JournalSnapshot>();
+        _r.Desk.ShellPid = 500;
+        _r.OneFrame(pid: 4242);
+        _r.Desk.DuringCreate = () => seen.Add(_r.Journal.Read());
+        _r.Desk.DuringEnumerate = () => seen.Add(_r.Journal.Read());
+        _r.Desk.DuringRead = () => seen.Add(_r.Journal.Read());
+
+        _r.Engine.Start();
+        _r.Pump(20);
+
+        seen.ShouldAllBe(s => s.Kind == JournalReadKind.Active);
+        seen.Select(s => s.Record.Site).ShouldBe([CallSite.RootCreate, CallSite.Enumerate, CallSite.PathRead], ignoreOrder: false);
+        seen[0].Record.TargetPid.ShouldBe(500u);                 // the root lives in the shell
+        seen[1].Record.TargetPid.ShouldBe(500u);
+        seen[2].Record.TargetPid.ShouldBe(4242u);                // a path read goes to the frame's own process
+        seen[2].Record.FrameHwnd.ShouldBe((nint)1);
+        seen.ShouldAllBe(s => s.Record.Generation == _r.Publisher.Generation);
+    }
+
+    [Fact]
+    public void NFR01_M2_Between_evaluations_no_operation_is_left_open()
+    {
+        _r.OneFrame();
+        _r.Engine.Start();
+        _r.Pump(20);
+        _r.Signal(TrackerSignal.CreateDestroy);
+        _r.Desk.FailNextReads(unchecked((int)0x80004005));      // a failure path releases through the map
+        _r.Signal();
+        _r.Pump(200);
+
+        _r.Journal.Read().Kind.ShouldBe(JournalReadKind.Idle);
+        _r.Journal.Defects.ShouldBe(0);
+        _r.Journal.LastOperationId.ShouldBeGreaterThan(3);
+    }
+
+    [Fact]
+    public void NFR01_M5_A_connected_and_validated_enumeration_counts_as_trial_evidence()
+    {
+        _r.OneFrame();
+        _r.Counters.FullEnumerations.ShouldBe(0);
+
+        _r.Engine.Start();
+
+        _r.Counters.FullEnumerations.ShouldBe(1);
+    }
+
+    [Fact]
+    public void NFR01_M5_A_root_that_cannot_be_created_is_not_trial_evidence()
+    {
+        _r.OneFrame();
+        _r.Desk.CreateFailures.Enqueue(unchecked((int)0x80004005));
+
+        _r.Engine.Start();
+
+        _r.Counters.FullEnumerations.ShouldBe(0);
+    }
+
+    // ---- hang pre-screen (04 § M.9) ----------------------------------------------------------------------
+
+    [Fact]
+    public void NFR01_M9_A_hung_foreground_frame_is_not_read_and_is_read_once_it_pumps_again()
+    {
+        _r.OneFrame(@"C:\a");
+        _r.Engine.Start();
+        _r.Pump(20);
+        int reads = _r.Desk.Reads;
+        _r.Desk.SetHung(1);
+        _r.Desk.Navigate(1, @"C:\b");
+
+        _r.Signal();
+        _r.Pump(200);
+
+        _r.Desk.Reads.ShouldBe(reads);                           // no call into the hung window
+        _r.Counters.PreScreened.ShouldBeGreaterThan(0);
+        _r.Delivered[^1].Path.ShouldBe(@"C:\a");
+
+        _r.Desk.SetHung(1, false);
+        _r.Pump(1500);                                           // the retry ladder reads it
+        _r.Delivered[^1].Path.ShouldBe(@"C:\b");
+    }
+
+    [Fact]
+    public void NFR01_M9_While_any_Explorer_frame_is_hung_no_enumeration_happens()
+    {
+        _r.OneFrame();
+        _r.Engine.Start();
+        _r.Pump(20);
+        int enumerations = _r.Desk.Enumerations;
+        _r.Desk.AddTab(2, 22, @"C:\new", true, 600);              // a new window: a miss would enumerate
+        _r.Desk.SetHung(1);                                      // ...while another Explorer window is hung
+        _r.Desk.Foreground = 2;
+
+        _r.Signal(TrackerSignal.Foreground);
+        _r.Pump(200);
+
+        _r.Desk.Enumerations.ShouldBe(enumerations);
+    }
+
+    [Fact]
+    public void NFR01_M9_A_worker_that_starts_while_a_frame_is_hung_defers_its_first_connection()
+    {
+        _r.OneFrame();
+        _r.Desk.SetHung(1);
+
+        _r.Engine.Start();
+        _r.Pump(300);
+
+        _r.Desk.GatewaysCreated.ShouldBe(0);                     // not even CoCreateInstance
+        _r.Engine.Recovering.ShouldBeTrue();
+        _r.Desk.SetHung(1, false);
+        _r.Pump(3000);
+        _r.Engine.Connected.ShouldBeTrue();
     }
 }

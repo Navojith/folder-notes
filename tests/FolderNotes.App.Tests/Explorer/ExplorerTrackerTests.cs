@@ -83,14 +83,20 @@ public sealed class ExplorerTrackerTests : IDisposable
     private readonly FakeExplorerDesktop _desk = new();
     private readonly FakeWinEvents _api = new();
     private readonly FakeUi _ui = new();
-    private readonly TrackerProcessGuard _guard = new();
+    private readonly TrackerProcessGuard _guard = new(quarantine: new QuarantineRecord(
+        TimeProvider.System, new QuarantineOptions { CheckInterval = TimeSpan.FromMilliseconds(50), TrialDeadline = TimeSpan.FromSeconds(2) }));
+    private readonly FakeServerProbe _probe = new();
     private readonly List<ActiveFolderState> _events = [];
     private readonly List<string> _log = [];
     private readonly ExplorerTracker _tracker;
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
     private int _eventThread;
 
-    public ExplorerTrackerTests() => _tracker = Make(_guard);
+    public ExplorerTrackerTests()
+    {
+        _probe.Run(500);                                       // the fake desktop's Explorer process (frame pid 500)
+        _tracker = Make(_guard);
+    }
 
     private ExplorerTracker Make(TrackerProcessGuard guard)
     {
@@ -103,7 +109,8 @@ public sealed class ExplorerTrackerTests : IDisposable
                 WorkerStartTimeout = TimeSpan.FromSeconds(2),
                 WorkerStopTimeout = TimeSpan.FromMilliseconds(500),
             },
-            _log.Add);
+            _log.Add,
+            _probe);
         t.ActiveFolderChanged += (_, e) =>
         {
             _eventThread = Environment.CurrentManagedThreadId;
@@ -292,7 +299,7 @@ public sealed class ExplorerTrackerTests : IDisposable
         _desk.GatewaysCreated.ShouldBe(2);
     }
 
-    // ---- wedge, replacement, breaker, cap ------------------------------------------------------------------
+    // ---- wedge, quarantine, breaker, cap (04 B.6, § M) -------------------------------------------------------
 
     private void Wedge()
     {
@@ -301,11 +308,11 @@ public sealed class ExplorerTrackerTests : IDisposable
         Interlocked.Exchange(ref _desk.BlockNextReads, 1);
         _api.Fire(WinEventMap.ObjectNameChange);               // the worker will block inside the next path read
         WaitFor(() => _tracker.GetStats().AbandonedWorkers == before + 1, "worker abandoned");
-        WaitFor(() => _tracker.GetStats().State is TrackerState.Disabled || _tracker.GetStats().Replacements > 0, "decision applied");
+        WaitFor(() => _tracker.GetStats().State is TrackerState.Disabled or TrackerState.Quarantined, "decision applied");
     }
 
     [Fact]
-    public void NFR01_B6_A_wedged_worker_is_replaced_without_touching_the_hooks_and_its_late_result_is_dropped()
+    public void NFR01_M_A_wedged_worker_is_quarantined_without_touching_the_hooks_resumes_on_E1_and_its_late_result_is_dropped()
     {
         OneFrame(@"C:\a");
         _tracker.Start();
@@ -313,38 +320,51 @@ public sealed class ExplorerTrackerTests : IDisposable
         WaitFor(() => _api.Hooks.Count == 5, "scoped hooks");
         int installs = _api.Installs;
         int unhooks = _api.Unhooks;
-        var firstWorker = _desk.GatewaysCreated;
+        int gateways = _desk.GatewaysCreated;
 
-        _desk.BlockReads = new ManualResetEventSlim(false);
-        Interlocked.Exchange(ref _desk.BlockNextReads, 1);
-        _api.Fire(WinEventMap.ObjectNameChange);
-        WaitFor(() => _tracker.GetStats().Replacements == 1, "replacement");
+        Wedge();
+        Thread.Sleep(500);                                     // ten monitor looks: nothing may start while the read is stuck
 
         var stats = _tracker.GetStats();
         stats.CancelCalls.ShouldBe(1);
         stats.AbandonedWorkers.ShouldBe(1);
-        stats.State.ShouldBe(TrackerState.Running);
+        stats.State.ShouldBe(TrackerState.Quarantined);
+        stats.Availability.ShouldBe(TrackerAvailability.Quarantined);
+        stats.Replacements.ShouldBe(0);
+        stats.LastWedgeSite.ShouldBe(CallSite.PathRead);
+        stats.QuarantineEntries.Single().SuspectPids.ShouldBe([500u]);   // the frame's own process, from the journal
+        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
+        _desk.GatewaysCreated.ShouldBe(gateways);              // nobody touched Explorer again
+        WaitUi(() => _tracker.Current.IsInactive, "Inactive while quarantined");
+
+        _desk.BlockedReadResultPath = @"C:\zombie";              // what only the stuck worker's read can return
+        _desk.BlockReads!.Set();                               // the server answers: the zombie returns (E1)
+        WaitUi(() => _tracker.GetStats().State == TrackerState.Running && _events[^1].Path == @"C:\a", "resumed by E1");
+
         _api.Installs.ShouldBe(installs);                      // the hooks were never reinstalled or removed
         _api.Unhooks.ShouldBe(unhooks);
-        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(1);
-        WaitUi(() => _events.Count >= 2 && _events[^1].Path == @"C:\a", "the replacement's state");
-        // The Inactive published at the abandon was superseded before the UI pumped (latest-wins); the supervisor tests assert it at the gate.
-        _events[^1].Sequence.ShouldBeGreaterThan(_events[0].Sequence);
-        _desk.GatewaysCreated.ShouldBe(firstWorker + 1);       // a fresh root and an empty cache for the replacement
+        _desk.GatewaysCreated.ShouldBe(gateways + 1);          // a fresh root and an empty cache for the new worker
+        _events.ShouldNotContain(e => e.Path == @"C:\zombie");
+        _tracker.GetStats().ReleasesByCompletion.ShouldBe(1);
 
         _desk.Navigate(1, @"C:\after");
         _api.Fire(WinEventMap.ObjectNameChange);
-        WaitUi(() => _events[^1].Path == @"C:\after", "replacement publishes the next change");
+        WaitUi(() => _events[^1].Path == @"C:\after", "the new worker publishes the next change");
+        _tracker.Current.Path.ShouldBe(@"C:\after");
+    }
 
-        int eventCount = _events.Count;
-        _desk.BlockedReadResultPath = @"C:\zombie";                // what only the stuck worker's read can return
-        _desk.BlockReads.Set();                                // the zombie returns and tries to publish with the old generation
-        WaitFor(() => _desk.BlockedReadsCompleted == 1, "the zombie's read finished");
-        Thread.Sleep(400);                                     // it publishes (and is refused) well within this
-        _ui.Pump();
-        _events.Count.ShouldBe(eventCount);
-        _events.ShouldNotContain(e => e.Path == @"C:\zombie");
-        _tracker.Current.Path.ShouldBe(@"C:\after");              // the truth was never overwritten
+    [Fact]
+    public void NFR01_M4_E2_A_wedge_against_an_Explorer_process_that_then_exits_resumes_without_user_action()
+    {
+        OneFrame(@"C:\a");
+        _tracker.Start();
+        WaitUi(() => _events.Count == 1, "first event");
+        Wedge();
+
+        _probe.Exit(500);                                      // the frozen process ended (crash or close)
+
+        WaitFor(() => _tracker.GetStats().State == TrackerState.Running, "resumed by E2");
+        _tracker.GetStats().ReleasesByServerEnd.ShouldBe(1);
     }
 
     [Fact]
@@ -355,26 +375,38 @@ public sealed class ExplorerTrackerTests : IDisposable
         WaitUi(() => _events.Count == 1, "first event");
         WaitFor(() => _api.Hooks.Count == 5, "scoped hooks");
 
-        Wedge(); Wedge(); Wedge();
+        Wedge();
+        _tracker.Retry().ShouldBe(RetryResult.TrialStarted);
+        Wedge();
+        _tracker.Retry().ShouldBe(RetryResult.TrialStarted);
+        Wedge();
 
         var s = _tracker.GetStats();
         s.State.ShouldBe(TrackerState.Disabled);
         s.DisabledReason.ShouldBe(DisabledReason.CircuitBreaker);
+        s.Availability.ShouldBe(TrackerAvailability.Paused);
         s.CanRetry.ShouldBeTrue();
         s.PermanentlyDisabled.ShouldBeFalse();
         _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
         _tracker.Current.IsInactive.ShouldBeTrue();
         _tracker.Start().ShouldBe(StartResult.Disabled);       // switching it on again is not a Retry
 
-        _tracker.Retry().ShouldBe(RetryResult.Started);
-        WaitFor(() => _tracker.GetStats().State == TrackerState.Running && _guard.LiveThreads(TrackerThreadKind.Worker) == 1, "running again");
+        _tracker.Retry().ShouldBe(RetryResult.TrialStarted);   // the server is unresolved: an explicit trial (Q22)
+        _tracker.GetStats().Availability.ShouldBe(TrackerAvailability.RecoveryAttempt);
+        WaitFor(() => _tracker.GetStats().State == TrackerState.Running, "the trial passed at its deadline");
+        _tracker.GetStats().QuarantineEntries.ShouldBeEmpty();
         WaitUi(() => _tracker.Current.Path == @"C:\a", "state after Retry");
 
-        Wedge(); Wedge(); Wedge();
+        Wedge();
+        _tracker.Retry().ShouldBe(RetryResult.TrialStarted);
+        Wedge();
+        _tracker.Retry().ShouldBe(RetryResult.TrialStarted);
+        Wedge();
 
         s = _tracker.GetStats();
         s.PermanentlyDisabled.ShouldBeTrue();
         s.DisabledReason.ShouldBe(DisabledReason.ThreadCap);
+        s.Availability.ShouldBe(TrackerAvailability.PermanentlyOff);
         s.CanRetry.ShouldBeFalse();
         s.AbandonedWorkers.ShouldBe(6);
         _tracker.Retry().ShouldBe(RetryResult.ThreadCapReached);

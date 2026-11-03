@@ -36,6 +36,7 @@ internal sealed class EvaluationWatchdog
     private long? _startedAt;
     private long? _cancelIssuedAt;
     private bool _abandoned;
+    private int? _lastCancelHr;
 
     public EvaluationWatchdog(TimeProvider clock, WatchdogOptions? options = null)
     {
@@ -63,6 +64,29 @@ internal sealed class EvaluationWatchdog
         {
             _startedAt = null;
             _cancelIssuedAt = null;
+        }
+    }
+
+    /// <summary>Timestamp at which the evaluation being timed began (null between evaluations). Kept after an abandon.</summary>
+    public long? StartedAt
+    {
+        get { lock (_gate) { return _startedAt; } }
+    }
+
+    /// <summary>
+    /// HRESULT of the last cancel request for this worker (null = none issued). Diagnostic only: <c>S_OK</c> means "an attempt
+    /// was made", never that the remote operation ended (04 § M.1), so nothing releases a quarantine on it.
+    /// </summary>
+    public int? LastCancelHr
+    {
+        get { lock (_gate) { return _lastCancelHr; } }
+    }
+
+    public void RecordCancelResult(int hr)
+    {
+        lock (_gate)
+        {
+            _lastCancelHr = hr;
         }
     }
 

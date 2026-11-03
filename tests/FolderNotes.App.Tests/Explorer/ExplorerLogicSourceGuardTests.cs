@@ -15,6 +15,7 @@ public class ExplorerLogicSourceGuardTests
     [
         "ActiveFolderState.cs", "ComFailureClassifier.cs", "TabMap.cs", "EvaluationScheduler.cs",
         "StatePublisher.cs", "EvaluationWatchdog.cs", "TrackerStateMachine.cs", "SignalRouter.cs",
+        "CallJournal.cs", "Quarantine.cs",
     ];
 
     /// <summary>04 B.7 / J-H11: the hook thread and everything it calls are COM-free, file-system-free and UI-free.</summary>

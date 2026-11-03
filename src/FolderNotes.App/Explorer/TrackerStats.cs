@@ -45,7 +45,51 @@ internal sealed record TrackerStats
     public bool CanRetry { get; init; }
 
     public bool PermanentlyDisabled { get; init; }
+
+    // ---- quarantine (04 § M.7, M.10) ----
+
+    /// <summary>What the user is told: tracking, temporarily unavailable, quarantined, recovery attempt, paused, permanently off.</summary>
+    public TrackerAvailability Availability { get; init; }
+
+    public QuarantinePhase QuarantinePhase { get; init; }
+
+    public int QuarantineEpisodes { get; init; }
+
+    /// <summary>Unresolved entries: site, suspect kind, suspect pids and age.</summary>
+    public IReadOnlyList<QuarantineEntrySummary> QuarantineEntries { get; init; } = [];
+
+    /// <summary>Entries resolved because the blocked operation completed or its thread ended (E1).</summary>
+    public int ReleasesByCompletion { get; init; }
+
+    /// <summary>Entries resolved because the suspect server ended or was replaced (E2).</summary>
+    public int ReleasesByServerEnd { get; init; }
+
+    /// <summary>Records cleared by a passed trial.</summary>
+    public int ReleasesByTrial { get; init; }
+
+    public int TrialsStarted { get; init; }
+
+    public int TrialsWedged { get; init; }
+
+    public int TrialsInconclusive { get; init; }
+
+    /// <summary>HRESULT of the most recent cancel request. Diagnostic only, never release evidence (04 § M.1).</summary>
+    public int? LastCancelHr { get; init; }
+
+    public CallSite LastWedgeSite { get; init; }
+
+    /// <summary>Operations of the live worker found open at the start of an evaluation (must stay 0).</summary>
+    public int JournalDefects { get; init; }
+
+    /// <summary>Full enumerations of a validated root (trial evidence).</summary>
+    public long FullEnumerations { get; init; }
+
+    /// <summary>COM calls skipped because a frame was hung (04 § M.9).</summary>
+    public long PreScreened { get; init; }
 }
+
+/// <summary>One unresolved quarantine entry, as plain data.</summary>
+internal sealed record QuarantineEntrySummary(CallSite Site, JournalReadKind Snapshot, SuspectKind Suspect, IReadOnlyList<uint> SuspectPids, TimeSpan Age, int? CancelHr);
 
 /// <summary>Counters shared by every worker generation (they must survive a replacement). Thread-safe.</summary>
 internal sealed class TrackerCounters
@@ -58,6 +102,8 @@ internal sealed class TrackerCounters
     private long _rebuilds;
     private long _recoveries;
     private long _published;
+    private long _fullEnumerations;
+    private long _preScreened;
     private int _next;
     private int _count;
 
@@ -74,6 +120,16 @@ internal sealed class TrackerCounters
     public void CountRecovery() => Interlocked.Increment(ref _recoveries);
 
     public void CountPublished() => Interlocked.Increment(ref _published);
+
+    /// <summary>Enumerations of a created and validated root that answered (04 § M.5: what a trial worker must achieve to pass).</summary>
+    public long FullEnumerations => Interlocked.Read(ref _fullEnumerations);
+
+    public void CountFullEnumeration() => Interlocked.Increment(ref _fullEnumerations);
+
+    /// <summary>Calls not made because a frame was hung (04 § M.9 pre-screen).</summary>
+    public long PreScreened => Interlocked.Read(ref _preScreened);
+
+    public void CountPreScreened() => Interlocked.Increment(ref _preScreened);
 
     public void RecordEvaluation(TimeSpan elapsed)
     {

@@ -62,7 +62,8 @@ internal sealed class ExplorerTracker : IExplorerTracker
         TrackerProcessGuard? guard = null,
         TimeProvider? clock = null,
         ExplorerTrackerOptions? options = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        IServerProbe? probe = null)
     {
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
         _factory = factory ?? new ComShellWindowsGatewayFactory(_rcw);
@@ -74,9 +75,9 @@ internal sealed class ExplorerTracker : IExplorerTracker
         _publisher = new StatePublisher(Deliver);
         _machine = new TrackerStateMachine(_clock, _publisher, _guard, _options.Limits);
         _hooks = new HookThread(winEvents ?? new Win32WinEventApi(), _router, _guard, _log, _options.Hook);
-        _watchdog = new WatchdogThread(_guard, w => _supervisor!.OnWorkerWedged(w), null, _log);
+        _watchdog = new WatchdogThread(_guard, w => _supervisor!.OnWorkerWedged(w), null, _log, () => _supervisor!.OnMonitorTick());
         _supervisor = new WorkerSupervisor(
-            _machine, _router, _publisher, _watchdog, CreateWorker, _log,
+            _machine, _router, _publisher, _watchdog, CreateWorker, probe ?? new Win32ServerProbe(), () => _counters.FullEnumerations, _log,
             _options.WorkerStartTimeout, _options.WorkerStopTimeout,
             beforeWorker: StartHooks, onStopping: () => _hooks.Stop());
     }
@@ -103,6 +104,9 @@ internal sealed class ExplorerTracker : IExplorerTracker
     public TrackerStats GetStats()
     {
         var (p50, p95, max) = _counters.Percentiles();
+        var record = _machine.Quarantine;
+        var releases = record.Releases;
+        var trials = _supervisor.Trials;
         return new TrackerStats
         {
             Evaluations = _counters.Evaluations,
@@ -123,6 +127,23 @@ internal sealed class ExplorerTracker : IExplorerTracker
             DisabledReason = _machine.DisabledReason,
             CanRetry = _machine.CanRetry,
             PermanentlyDisabled = _machine.IsPermanentlyDisabled,
+            Availability = _machine.Availability,
+            QuarantinePhase = _machine.State == TrackerState.Quarantined ? _machine.Phase : QuarantinePhase.None,
+            QuarantineEpisodes = record.Episodes,
+            QuarantineEntries = record.Entries.Select(e => new QuarantineEntrySummary(
+                e.Snapshot.Record.Site, e.Snapshot.Kind, e.Suspect.Kind, e.Suspect.Servers.Select(s => s.Pid).ToList(),
+                record.Clock.GetElapsedTime(e.AbandonedAt), e.CancelHr)).ToList(),
+            ReleasesByCompletion = releases.ByCompletion,
+            ReleasesByServerEnd = releases.ByServerEnd,
+            ReleasesByTrial = releases.ByTrial,
+            TrialsStarted = trials.Started,
+            TrialsWedged = trials.Wedged,
+            TrialsInconclusive = trials.Inconclusive,
+            LastCancelHr = _watchdog.LastCancelHr,
+            LastWedgeSite = _supervisor.LastWedgeSite,
+            JournalDefects = _supervisor.Current?.Journal.Defects ?? 0,
+            FullEnumerations = _counters.FullEnumerations,
+            PreScreened = _counters.PreScreened,
         };
     }
 
@@ -151,7 +172,7 @@ internal sealed class ExplorerTracker : IExplorerTracker
             generation,
             onStart: host =>
             {
-                var engine = new TrackerEngine(generation, _factory, _win, _publisher, _machine, new GenerationScope(generation, _publisher, _hooks), _counters, _clock, _options.Scheduler, _log);
+                var engine = new TrackerEngine(generation, _factory, _win, _publisher, _machine, new GenerationScope(generation, _publisher, _hooks), _counters, _clock, _options.Scheduler, _log, host.Journal);
                 var timer = new Timer(static state => ((StaWorkerHost)state!).TryPost(), host, Timeout.Infinite, Timeout.Infinite);
                 host.State = new WorkerState(engine, timer);
                 engine.Start();

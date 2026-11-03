@@ -12,7 +12,7 @@ internal sealed class WatchdogThread : IDisposable
 {
     private readonly TrackerProcessGuard _guard;
     private readonly Action<IWatchedWorker> _onWedged;
-    private readonly Action<uint> _cancel;
+    private readonly Func<uint, int> _cancel;
     private readonly Action<string> _log;
     private readonly AutoResetEvent _wake = new(false);
     private readonly Lock _gate = new();
@@ -24,16 +24,44 @@ internal sealed class WatchdogThread : IDisposable
     private int _cancelCalls;
     private long _maxCancelTicks;
     private int _slowCancelLogged;
+    private readonly Func<TimeSpan?>? _monitor;
+    private int _monitorRequested;
+    private long _monitorDueAt = long.MaxValue;              // Stopwatch timestamp; MaxValue = not scheduled
+    private const long NoCancel = long.MinValue;
+    private long _lastCancelHr = NoCancel;
 
     /// <summary>A cancel slower than this is logged once and is the trigger for the contingency design (04 § H, P6).</summary>
     public static readonly TimeSpan SlowCancel = TimeSpan.FromMilliseconds(50);
 
-    public WatchdogThread(TrackerProcessGuard guard, Action<IWatchedWorker> onWedged, Action<uint>? cancel = null, Action<string>? log = null)
+    /// <param name="cancel">Issues the cancel request for a worker thread id and returns its HRESULT (default <c>CoCancelCall(tid, 0)</c>).</param>
+    /// <param name="monitor">
+    /// The quarantine monitor (04 § M.4): called on this thread when due; returns the delay until it wants to run again, or
+    /// null while there is nothing to monitor (the thread then waits on its event only, so idle cost is unchanged).
+    /// </param>
+    public WatchdogThread(TrackerProcessGuard guard, Action<IWatchedWorker> onWedged, Func<uint, int>? cancel = null, Action<string>? log = null, Func<TimeSpan?>? monitor = null)
     {
         _guard = guard ?? throw new ArgumentNullException(nameof(guard));
         _onWedged = onWedged ?? throw new ArgumentNullException(nameof(onWedged));
-        _cancel = cancel ?? (static tid => _ = ComNative.CoCancelCall(tid, 0));
+        _cancel = cancel ?? (static tid => ComNative.CoCancelCall(tid, 0));
         _log = log ?? (_ => { });
+        _monitor = monitor;
+    }
+
+    /// <summary>Asks the monitor to run now (a quarantine began, or its state changed).</summary>
+    public void RequestMonitor()
+    {
+        Volatile.Write(ref _monitorRequested, 1);
+        _wake.Set();
+    }
+
+    /// <summary>The HRESULT of the most recent cancel request (diagnostic; never evidence, 04 § M.1). Null before any.</summary>
+    public int? LastCancelHr
+    {
+        get
+        {
+            long v = Interlocked.Read(ref _lastCancelHr);
+            return v == NoCancel ? null : (int)v;
+        }
     }
 
     /// <summary>How many times <c>CoCancelCall</c> was issued (diagnostics and tests).</summary>
@@ -140,16 +168,29 @@ internal sealed class WatchdogThread : IDisposable
                     worker = _watched;
                 }
 
-                TimeSpan? wait = worker?.Watchdog.TimeUntilNextCheck();
+                TimeSpan? monitorWait = MonitorWait();
+                if (monitorWait == TimeSpan.Zero)
+                {
+                    RunMonitor();
+                    continue;
+                }
+
+                TimeSpan? workerWait = worker?.Watchdog.TimeUntilNextCheck();
+                TimeSpan? wait = workerWait is null ? monitorWait : monitorWait is null ? workerWait : (workerWait < monitorWait ? workerWait : monitorWait);
                 if (wait is null)
                 {
-                    _wake.WaitOne();                       // idle: no evaluation is running, so nothing to time
+                    _wake.WaitOne();                       // idle: no evaluation is running and nothing is quarantined, so nothing to time
                     continue;
                 }
 
                 if (wait.Value > TimeSpan.Zero && _wake.WaitOne(wait.Value))
                 {
-                    continue;                              // re-read: a new evaluation began or the watch changed
+                    continue;                              // re-read: a new evaluation began, the watch changed or the monitor was requested
+                }
+
+                if (MonitorWait() == TimeSpan.Zero)
+                {
+                    continue;                              // the monitor is due: it runs at the top of the loop
                 }
 
                 if (worker is null)
@@ -161,7 +202,7 @@ internal sealed class WatchdogThread : IDisposable
                 {
                     case WatchdogAction.Cancel:
                         Interlocked.Increment(ref _cancelCalls);
-                        SafeCancel(worker.ThreadId);
+                        SafeCancel(worker);
                         break;
                     case WatchdogAction.Abandon:
                         Unwatch(worker);
@@ -185,8 +226,50 @@ internal sealed class WatchdogThread : IDisposable
         }
     }
 
-    private void SafeCancel(uint threadId)
+    private TimeSpan? MonitorWait()
     {
+        if (_monitor is null)
+        {
+            return null;
+        }
+
+        if (Volatile.Read(ref _monitorRequested) != 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        long due = Volatile.Read(ref _monitorDueAt);
+        if (due == long.MaxValue)
+        {
+            return null;
+        }
+
+        long left = due - System.Diagnostics.Stopwatch.GetTimestamp();
+        return left <= 0 ? TimeSpan.Zero : TimeSpan.FromSeconds((double)left / System.Diagnostics.Stopwatch.Frequency);
+    }
+
+    private void RunMonitor()
+    {
+        Volatile.Write(ref _monitorRequested, 0);
+        TimeSpan? next = null;
+        try
+        {
+            next = _monitor!();
+        }
+        catch (Exception ex)
+        {
+            _log($"Quarantine monitor failed: {ex.GetType().Name}: {ex.Message}");
+            next = TimeSpan.FromSeconds(1);                // keep monitoring: a failure must not strand a quarantine
+        }
+
+        Volatile.Write(ref _monitorDueAt, next is { } n
+            ? System.Diagnostics.Stopwatch.GetTimestamp() + (long)(n.TotalSeconds * System.Diagnostics.Stopwatch.Frequency)
+            : long.MaxValue);
+    }
+
+    private void SafeCancel(IWatchedWorker worker)
+    {
+        uint threadId = worker.ThreadId;
         try
         {
             if (threadId != 0)
@@ -194,7 +277,9 @@ internal sealed class WatchdogThread : IDisposable
                 long start = System.Diagnostics.Stopwatch.GetTimestamp();
                 try
                 {
-                    _cancel(threadId);
+                    int hr = _cancel(threadId);
+                    worker.Watchdog.RecordCancelResult(hr);
+                    Interlocked.Exchange(ref _lastCancelHr, hr);
                 }
                 finally
                 {

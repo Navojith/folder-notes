@@ -12,6 +12,7 @@ internal interface IWatchedWorker
     EvaluationWatchdog Watchdog { get; }
 }
 
+
 /// <summary>
 /// The one COM thread (04 B.2): a named STA thread with its own message loop that owns every COM object. All the
 /// work it does arrives as delegates that run <i>on it</i>, so no COM reference ever leaves the thread:
@@ -24,7 +25,7 @@ internal interface IWatchedWorker
 /// thrown by a delegate escapes the loop. Stop is bounded: if the thread does not end it is <i>abandoned</i> (a
 /// background thread, never joined, 04 B.6).
 /// </summary>
-internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
+internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker, IAbandonedWorkerView
 {
     private const uint WmWake = MessageLoopNative.WM_APP + 2;
     private const uint WmRun = MessageLoopNative.WM_APP + 3;
@@ -54,6 +55,7 @@ internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
         Action? afterBegin = null)
     {
         Generation = generation;
+        Journal = new CallJournal(generation, clock);
         _onStart = onStart ?? throw new ArgumentNullException(nameof(onStart));
         _onWake = onWake ?? throw new ArgumentNullException(nameof(onWake));
         _onStop = onStop ?? throw new ArgumentNullException(nameof(onStop));
@@ -67,6 +69,9 @@ internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
 
     public EvaluationWatchdog Watchdog { get; }
 
+    /// <summary>The operation in flight (04 § M.2): written by this worker's thread, read by the supervisor when it abandons it.</summary>
+    public CallJournal Journal { get; }
+
     /// <summary>The worker's own state (its engine and timer), set and read on the worker thread or by the owner that created it.</summary>
     public object? State { get; set; }
 
@@ -79,6 +84,8 @@ internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
     public bool IsAbandoned => _abandoned;
 
     public bool HasExited => _exited.Task.IsCompleted;
+
+    public bool HasCompleted(long operationId) => Journal.HasCompleted(operationId);
 
     /// <summary>Starts the thread and waits up to <paramref name="timeout"/> for <c>onStart</c> to finish. False = it did not (and the thread is abandoned).</summary>
     public bool Start(TimeSpan timeout)
@@ -128,6 +135,7 @@ internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
     public void Evaluate(Action work)
     {
         Watchdog.Begin();
+        Journal.BeginEvaluation();                         // nothing may be left open between evaluations (04 § M.2)
         _afterBegin?.Invoke();
         try
         {

@@ -3,16 +3,23 @@ using Microsoft.Extensions.Time.Testing;
 
 namespace FolderNotes.App.Tests.Explorer;
 
-/// <summary>04 B.6 and F: lifecycle, the breaker, thread limits, abandoned-worker silence, recovery back-off.</summary>
+/// <summary>04 B.6, F and § M: lifecycle, quarantine after a wedge, the breaker, thread limits, abandoned-worker silence, recovery back-off.</summary>
 [Trait("Kind", "Deterministic")]
 public class TrackerStateMachineTests
 {
     private readonly FakeTimeProvider _clock = new();
     private readonly List<ActiveFolderState> _delivered = [];
     private readonly StatePublisher _pub;
-    private readonly TrackerProcessGuard _guard = new();
+    private readonly TrackerProcessGuard _guard;
 
-    public TrackerStateMachineTests() => _pub = new StatePublisher(_delivered.Add);
+    public TrackerStateMachineTests()
+    {
+        _pub = new StatePublisher(_delivered.Add);
+        _guard = new TrackerProcessGuard(quarantine: new QuarantineRecord(_clock));
+    }
+
+    /// <summary>An abandonment with no usable journal record: it never resolves by itself (only its zombie ending resolves it).</summary>
+    private QuarantineEntry Entry(FakeZombie? zombie = null) => TestEntries.Unknown(zombie ?? new FakeZombie(), _clock);
 
     private TrackerStateMachine Machine(TrackerLimits? limits = null, TrackerProcessGuard? guard = null) =>
         new(_clock, _pub, guard ?? _guard, limits);
@@ -82,35 +89,37 @@ public class TrackerStateMachineTests
         TrackerProcessGuard.Shared.ShouldBeSameAs(TrackerProcessGuard.Shared);
     }
 
-    // ---- wedge: replacement, silence, thread limits --------------------------------------------------
+    // ---- wedge: quarantine, silence, thread limits (04 B.6, § M) ---------------------------------------
 
     [Fact]
-    public void NFR01_A_wedge_allows_exactly_one_replacement_and_invalidates_the_old_generation_first()
+    public void NFR01_M_A_wedge_never_starts_a_replacement_it_quarantines_after_invalidating_the_old_generation()
     {
         var m = Started();
         int oldGeneration = _pub.Generation;
         _pub.TryPublish(oldGeneration, _pub.NextSequence(), new ActiveFolderState(1, 1, @"C:\a", 0));
 
-        var d = m.OnWedge();
+        var d = m.OnWedge(Entry());
 
-        d.Outcome.ShouldBe(WedgeOutcome.StartReplacement);
+        d.Outcome.ShouldBe(WedgeOutcome.Quarantined);
         d.Generation.ShouldBe(oldGeneration + 1);
         _pub.Generation.ShouldBe(d.Generation);
-        m.LiveWorkers.ShouldBe(0);                            // the abandoned worker is no longer counted as live
-        _delivered[^1].IsInactive.ShouldBeTrue();             // Inactive was published before any replacement exists
+        m.State.ShouldBe(TrackerState.Quarantined);
+        m.Phase.ShouldBe(QuarantinePhase.Waiting);
+        m.LiveWorkers.ShouldBe(0);                            // no worker at all while waiting for evidence
+        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
+        _delivered[^1].IsInactive.ShouldBeTrue();             // Inactive was published before anything else
         _guard.AbandonedThreads.ShouldBe(1);
-
-        m.ReplacementStarted();
-        m.LiveWorkers.ShouldBe(1);
+        _guard.Quarantine.HasUnresolved.ShouldBeTrue();
+        m.Availability.ShouldBe(TrackerAvailability.Quarantined);
     }
 
     [Fact]
-    public void NFR01_An_abandoned_worker_cannot_publish_after_a_wedge_but_the_replacement_can()
+    public void NFR01_An_abandoned_worker_cannot_publish_after_a_wedge_but_the_trial_worker_can()
     {
         var m = Started();
         int zombie = _pub.Generation;
-        var d = m.OnWedge();
-        m.ReplacementStarted();
+        var d = m.OnWedge(Entry());
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
         int before = _delivered.Count;
 
         _pub.TryPublish(zombie, _pub.NextSequence(), new ActiveFolderState(1, 1, @"C:\zombie", 0)).ShouldBe(PublishResult.StaleGeneration);
@@ -121,50 +130,56 @@ public class TrackerStateMachineTests
     }
 
     [Fact]
-    public void NFR01_A_second_live_worker_is_refused()
+    public void NFR01_M5_Only_one_trial_worker_at_a_time_and_never_a_second_live_worker()
     {
         var m = Started();
-        Should.Throw<InvalidOperationException>(() => m.ReplacementStarted());   // the first worker is still live
+        m.Retry().ShouldBe(RetryResult.NotDisabled);           // running: nothing to retry
 
-        m.OnWedge();
-        m.ReplacementStarted();
-        Should.Throw<InvalidOperationException>(() => m.ReplacementStarted());   // never two
+        m.OnWedge(Entry());
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
         m.LiveWorkers.ShouldBe(1);
+
+        m.Retry().ShouldBe(RetryResult.TrialInProgress);       // Q20
+        m.OnQuarantineTick(new QuarantineAssessment(false, false, true, true), 0).ShouldBe(QuarantineAction.None);
+        m.LiveWorkers.ShouldBe(1);
+        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(1);
     }
 
     [Fact]
-    public void NFR01_A_wedge_can_only_be_reported_for_the_live_worker_of_a_running_tracker()
+    public void NFR01_A_wedge_can_only_be_reported_for_a_live_worker()
     {
-        Should.Throw<InvalidOperationException>(() => Machine().OnWedge());
+        Should.Throw<InvalidOperationException>(() => Machine().OnWedge(Entry()));
         var m = Started();
-        m.OnWedge();                                          // worker gone, replacement not started yet
-        Should.Throw<InvalidOperationException>(() => m.OnWedge());
+        m.OnWedge(Entry());                                   // quarantined, no worker
+        Should.Throw<InvalidOperationException>(() => m.OnWedge(Entry()));
+    }
+
+    /// <summary>Wedge the live worker, then (if quarantined) let an explicit trial run so the next wedge has a worker to hit.</summary>
+    private void Wedge(TrackerStateMachine m)
+    {
+        if (m.OnWedge(Entry()).Outcome == WedgeOutcome.Quarantined)
+        {
+            m.Retry().ShouldBe(RetryResult.TrialStarted);
+        }
     }
 
     [Fact]
     public void NFR01_Repeated_failures_cannot_create_unlimited_threads_the_defaults_stop_at_six()
     {
         var m = Started();
-        int replacements = 0;
+        int trials = 0;
 
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < 20 && m.State != TrackerState.Disabled; i++)
         {
-            if (m.State == TrackerState.Disabled)
+            if (m.OnWedge(Entry()).Outcome == WedgeOutcome.Quarantined && m.Retry() == RetryResult.TrialStarted)
             {
-                break;
-            }
-
-            var d = m.OnWedge();
-            if (d.Outcome == WedgeOutcome.StartReplacement)
-            {
-                m.ReplacementStarted();
-                replacements++;
+                trials++;
             }
 
             Minutes(30);                                       // spaced out so the breaker window cannot be what stops it
         }
 
-        replacements.ShouldBe(5);
+        trials.ShouldBe(5);
         _guard.AbandonedThreads.ShouldBe(6);                   // the cap holds: never more than 6 leaked threads
         _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
         m.State.ShouldBe(TrackerState.Disabled);
@@ -177,12 +192,13 @@ public class TrackerStateMachineTests
     {
         var limits = new TrackerLimits { MaxAbandonedThreads = 2, BreakerWedges = 100 };
         var a = Started(limits);
-        a.OnWedge().Outcome.ShouldBe(WedgeOutcome.StartReplacement);
-        a.ReplacementStarted();
+        a.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Quarantined);
         a.Stop();                                              // user turns the panel off and on again
 
-        var b = Started(limits);
-        b.OnWedge().Outcome.ShouldBe(WedgeOutcome.Disabled);   // 2nd abandoned thread in the process = the cap
+        var b = Machine(limits);
+        b.Start().ShouldBe(StartResult.Quarantined);           // the quarantine is process-wide too (Q17)
+        b.Retry().ShouldBe(RetryResult.TrialStarted);
+        b.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Disabled);   // 2nd abandoned thread in the process = the cap
         b.DisabledReason.ShouldBe(DisabledReason.ThreadCap);
         _guard.AbandonedThreads.ShouldBe(2);
     }
@@ -190,14 +206,6 @@ public class TrackerStateMachineTests
     // ---- circuit breaker ----------------------------------------------------------------------------
 
     private static readonly TrackerLimits RoomyCap = new() { MaxAbandonedThreads = 6 };
-
-    private static void Wedge(TrackerStateMachine m)
-    {
-        if (m.OnWedge().Outcome == WedgeOutcome.StartReplacement)
-        {
-            m.ReplacementStarted();
-        }
-    }
 
     [Fact]
     public void NFR01_Three_wedges_inside_ten_minutes_trip_the_breaker()
@@ -208,15 +216,16 @@ public class TrackerStateMachineTests
         Minutes(3);
         Wedge(m);
         Minutes(3);
-        m.State.ShouldBe(TrackerState.Running);
+        m.State.ShouldBe(TrackerState.Quarantined);
 
-        var d = m.OnWedge();
+        var d = m.OnWedge(Entry());
 
         d.Outcome.ShouldBe(WedgeOutcome.Disabled);
         d.Reason.ShouldBe(DisabledReason.CircuitBreaker);
         m.State.ShouldBe(TrackerState.Disabled);
         m.LiveWorkers.ShouldBe(0);
         _delivered[^1].IsInactive.ShouldBeTrue();
+        m.Availability.ShouldBe(TrackerAvailability.Paused);
     }
 
     [Fact]
@@ -227,8 +236,7 @@ public class TrackerStateMachineTests
         Minutes(5);
         Wedge(m);                                               // t = 5
         Minutes(5);                                             // t = 10:00 exactly -> the first wedge is 10 min old = expired
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.StartReplacement);
-        m.State.ShouldBe(TrackerState.Running);
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Quarantined);
     }
 
     [Fact]
@@ -239,7 +247,7 @@ public class TrackerStateMachineTests
         Minutes(5);
         Wedge(m);                                               // t = 5
         _clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromTicks(1));   // t = 10:00 - 1 tick
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.Disabled);
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Disabled);
     }
 
     [Fact]
@@ -247,20 +255,19 @@ public class TrackerStateMachineTests
     {
         var m = Started(RoomyCap);
         Wedge(m);
-        Wedge2(m);
+        Minutes(1);
+        Wedge(m);
         Minutes(10);
 
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.StartReplacement);
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Quarantined);
         m.WedgesInWindow.ShouldBe(1);
     }
-
-    private void Wedge2(TrackerStateMachine m) { Minutes(1); Wedge(m); }
 
     [Fact]
     public void NFR01_Start_is_refused_while_Disabled_and_Stop_does_not_clear_the_latch()
     {
         var m = Started(RoomyCap);
-        Wedge(m); Wedge(m); m.OnWedge();
+        Wedge(m); Wedge(m); m.OnWedge(Entry());
         m.State.ShouldBe(TrackerState.Disabled);
 
         m.Start().ShouldBe(StartResult.Disabled);
@@ -270,33 +277,56 @@ public class TrackerStateMachineTests
     }
 
     [Fact]
-    public void NFR01_Retry_after_a_breaker_trip_restarts_with_one_worker_and_a_clean_window()
+    public void NFR01_M6_Q22_Retry_after_a_breaker_trip_with_an_unresolved_server_is_a_trial_with_a_clean_window()
     {
         var m = Started(RoomyCap);
-        Wedge(m); Wedge(m); m.OnWedge();
+        Wedge(m); Wedge(m); m.OnWedge(Entry());
 
-        m.Retry().ShouldBe(RetryResult.Started);
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
 
-        m.State.ShouldBe(TrackerState.Running);
+        m.State.ShouldBe(TrackerState.Quarantined);
+        m.Phase.ShouldBe(QuarantinePhase.Trial);
         m.LiveWorkers.ShouldBe(1);
         m.DisabledReason.ShouldBe(DisabledReason.None);
         m.WedgesInWindow.ShouldBe(0);
+        _guard.Quarantine.HasUnresolved.ShouldBeTrue();        // the retry did not clear the record
         // it takes three fresh wedges to trip again
         Wedge(m);
-        m.State.ShouldBe(TrackerState.Running);
+        m.State.ShouldBe(TrackerState.Quarantined);
         Wedge(m);
+        m.State.ShouldBe(TrackerState.Quarantined);
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Disabled);
+    }
+
+    [Fact]
+    public void NFR01_M6_Q23_Retry_after_a_breaker_trip_whose_servers_resolved_restarts_normally()
+    {
+        var m = Started(RoomyCap);
+        var zombies = new[] { new FakeZombie(), new FakeZombie(), new FakeZombie() };
+        m.OnWedge(Entry(zombies[0])); m.Retry();
+        m.OnWedge(Entry(zombies[1])); m.Retry();
+        m.OnWedge(Entry(zombies[2]));
+        foreach (var z in zombies)
+        {
+            z.Exit();                                           // every blocked call came back (E1)
+        }
+
+        m.OnQuarantineTick(_guard.Quarantine.Assess(new FakeServerProbe()), 0).ShouldBe(QuarantineAction.None);   // Q14: no automatic restart
+        m.State.ShouldBe(TrackerState.Disabled);
+
+        m.Retry().ShouldBe(RetryResult.Started);
         m.State.ShouldBe(TrackerState.Running);
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.Disabled);
+        m.LiveWorkers.ShouldBe(1);
     }
 
     [Fact]
     public void NFR01_Retry_is_refused_once_the_lifetime_thread_cap_is_used_up()
     {
         var m = Started(RoomyCap);                              // cap 6
-        Wedge(m); Wedge(m); m.OnWedge();                        // 3 abandoned, breaker
-        m.Retry().ShouldBe(RetryResult.Started);
+        Wedge(m); Wedge(m); m.OnWedge(Entry());                 // 3 abandoned, breaker
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
         Wedge(m); Wedge(m);                                     // 5 abandoned
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.Disabled);    // 6th abandoned: breaker AND cap
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Disabled);    // 6th abandoned: breaker AND cap
 
         m.Retry().ShouldBe(RetryResult.ThreadCapReached);
         m.State.ShouldBe(TrackerState.Disabled);
@@ -314,16 +344,25 @@ public class TrackerStateMachineTests
     }
 
     [Fact]
+    public void NFR01_D6_The_shipped_quarantine_timing_is_hold_10s_minimum_30s_check_1s_trial_10s()
+    {
+        QuarantineOptions.Default.HealthHold.ShouldBe(TimeSpan.FromSeconds(10));
+        QuarantineOptions.Default.MinimumQuarantine.ShouldBe(TimeSpan.FromSeconds(30));
+        QuarantineOptions.Default.CheckInterval.ShouldBe(TimeSpan.FromSeconds(1));
+        QuarantineOptions.Default.TrialDeadline.ShouldBe(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public void NFR01_Q1_With_the_defaults_the_first_breaker_trip_accepts_one_Retry()
     {
         var m = Started();
         Wedge(m); Wedge(m);
-        var d = m.OnWedge();
+        var d = m.OnWedge(Entry());
 
         d.Reason.ShouldBe(DisabledReason.CircuitBreaker);      // 3 abandoned: retryable, not permanent
         m.IsPermanentlyDisabled.ShouldBeFalse();
         m.CanRetry.ShouldBeTrue();
-        m.Retry().ShouldBe(RetryResult.Started);
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
         _guard.AbandonedThreads.ShouldBe(3);                   // Retry never resets the lifetime counter
     }
 
@@ -331,10 +370,10 @@ public class TrackerStateMachineTests
     public void NFR01_Q1_Second_trip_exhausts_the_cap_and_the_permanent_reason_wins()
     {
         var m = Started();
-        Wedge(m); Wedge(m); m.OnWedge();                       // episode 1: 3 abandoned
-        m.Retry().ShouldBe(RetryResult.Started);
+        Wedge(m); Wedge(m); m.OnWedge(Entry());                // episode 1: 3 abandoned
+        m.Retry().ShouldBe(RetryResult.TrialStarted);
         Wedge(m); Wedge(m);                                    // 5 abandoned
-        var d = m.OnWedge();                                   // 6th: breaker AND cap at the same time
+        var d = m.OnWedge(Entry());                            // 6th: breaker AND cap at the same time
 
         d.Outcome.ShouldBe(WedgeOutcome.Disabled);
         d.Reason.ShouldBe(DisabledReason.ThreadCap);
@@ -343,15 +382,16 @@ public class TrackerStateMachineTests
         m.CanRetry.ShouldBeFalse();
         m.Retry().ShouldBe(RetryResult.ThreadCapReached);
         _guard.AbandonedThreads.ShouldBe(6);
+        m.Availability.ShouldBe(TrackerAvailability.PermanentlyOff);
     }
 
     [Fact]
     public void NFR01_Q1_Permanent_exhaustion_is_never_lifted_by_waiting_restarting_or_stopping()
     {
         var m = Started();
-        Wedge(m); Wedge(m); m.OnWedge();
+        Wedge(m); Wedge(m); m.OnWedge(Entry());
         m.Retry();
-        Wedge(m); Wedge(m); m.OnWedge();
+        Wedge(m); Wedge(m); m.OnWedge(Entry());
 
         Minutes(24 * 60);                                      // a day later
         m.Retry().ShouldBe(RetryResult.ThreadCapReached);
@@ -373,7 +413,7 @@ public class TrackerStateMachineTests
             Minutes(11);                                       // each wedge expires before the next: breaker never trips
         }
 
-        var d = m.OnWedge();
+        var d = m.OnWedge(Entry());
 
         d.Reason.ShouldBe(DisabledReason.ThreadCap);
         m.IsPermanentlyDisabled.ShouldBeTrue();
@@ -384,11 +424,11 @@ public class TrackerStateMachineTests
     public void NFR01_Q1_The_exhaustion_count_is_shared_by_every_tracker_instance_of_the_process()
     {
         var a = Started();
-        Wedge(a); Wedge(a); a.OnWedge();                       // 3 abandoned by tracker A, breaker
+        Wedge(a); Wedge(a); a.OnWedge(Entry());                // 3 abandoned by tracker A, breaker
         a.Stop();                                              // stays Disabled and keeps the slot
-        a.Retry().ShouldBe(RetryResult.Started);
+        a.Retry().ShouldBe(RetryResult.TrialStarted);
         Wedge(a); Wedge(a);
-        a.OnWedge().Reason.ShouldBe(DisabledReason.ThreadCap);
+        a.OnWedge(Entry()).Reason.ShouldBe(DisabledReason.ThreadCap);
 
         var b = Machine();
         b.Start().ShouldBe(StartResult.Disabled);              // the shared count says the process is exhausted
@@ -433,11 +473,11 @@ public class TrackerStateMachineTests
     public void NFR01_A_disabled_tracker_keeps_the_process_slot_so_no_second_tracker_can_replace_it()
     {
         var m = Started(RoomyCap);
-        Wedge(m); Wedge(m); m.OnWedge();
+        Wedge(m); Wedge(m); m.OnWedge(Entry());
         m.Stop();
 
         Machine().Start().ShouldBe(StartResult.AnotherTrackerActive);
-        m.Retry().ShouldBe(RetryResult.Started);                // the owner itself may retry
+        m.Retry().ShouldBe(RetryResult.TrialStarted);           // the owner itself may retry (a trial: the server is unresolved)
     }
 
     [Fact]
@@ -504,9 +544,9 @@ public class TrackerStateMachineTests
         var m = Started();
         m.ShellGone();
 
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.StartReplacement);
-        m.ReplacementStarted();
-        m.State.ShouldBe(TrackerState.Recovering);
+        m.OnWedge(Entry()).Outcome.ShouldBe(WedgeOutcome.Quarantined);   // no replacement: quarantined like any wedge (04 § M)
+        m.State.ShouldBe(TrackerState.Quarantined);
+        m.LiveWorkers.ShouldBe(0);
     }
 
     // ---- root validation (04 F, L7) -------------------------------------------------------------------

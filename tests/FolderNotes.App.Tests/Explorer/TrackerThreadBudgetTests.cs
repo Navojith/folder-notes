@@ -99,19 +99,19 @@ public class TrackerThreadBudgetTests
     }
 
     [Fact]
-    public void NFR06_The_state_machine_holds_the_worker_slot_from_Start_to_Stop_and_through_replacements()
+    public void NFR06_The_state_machine_holds_the_worker_slot_from_Start_to_Stop_and_through_trials()
     {
-        var g = new TrackerProcessGuard();
         var clock = new FakeTimeProvider();
+        var g = new TrackerProcessGuard(quarantine: new QuarantineRecord(clock));
         var m = new TrackerStateMachine(clock, new StatePublisher(_ => { }), g);
 
         m.Start().ShouldBe(StartResult.Started);
         g.LiveThreads(TrackerThreadKind.Worker).ShouldBe(1);
 
-        m.OnWedge();                                          // abandoned: slot freed, zombie counted
+        m.OnWedge(TestEntries.Unknown(new FakeZombie(), clock));   // abandoned: slot freed, zombie counted, no replacement
         g.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
         g.OwnedThreads.ShouldBe(1);
-        m.ReplacementStarted();
+        m.Retry().ShouldBe(RetryResult.TrialStarted);         // a trial takes the one slot (04 § M.8)
         g.LiveThreads(TrackerThreadKind.Worker).ShouldBe(1);
         g.OwnedThreads.ShouldBe(2);
 
@@ -123,8 +123,8 @@ public class TrackerThreadBudgetTests
     [Fact]
     public void NFR06_Worst_case_the_whole_budget_is_exhausted_at_ten_threads_and_no_more_can_be_made()
     {
-        var g = new TrackerProcessGuard();
         var clock = new FakeTimeProvider();
+        var g = new TrackerProcessGuard(quarantine: new QuarantineRecord(clock));
         var m = new TrackerStateMachine(clock, new StatePublisher(_ => { }), g);
         m.Start();
         g.TryReserveThread(TrackerThreadKind.Hook).ShouldBeTrue();
@@ -132,14 +132,10 @@ public class TrackerThreadBudgetTests
 
         for (int i = 0; i < 6; i++)
         {
-            var d = m.OnWedge();
-            if (d.Outcome == WedgeOutcome.StartReplacement)
+            m.OnWedge(TestEntries.Unknown(new FakeZombie(), clock));
+            if (m.CanRetry)
             {
-                m.ReplacementStarted();
-            }
-            else if (m.CanRetry)
-            {
-                m.Retry().ShouldBe(RetryResult.Started);
+                m.Retry().ShouldBe(RetryResult.TrialStarted);   // quarantined or paused: the next worker is a trial
             }
 
             clock.Advance(TimeSpan.FromMinutes(11));

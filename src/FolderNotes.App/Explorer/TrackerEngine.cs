@@ -50,6 +50,7 @@ internal sealed class TrackerEngine : IDisposable
     private readonly EvaluationScheduler _scheduler;
     private readonly TabMap<TabHandle> _map = new();
     private readonly RootValidator _validator = new();
+    private readonly CallJournal _journal;
     private IShellWindowsGateway? _gateway;
     private uint _shellPid;
     private uint _scopePid;
@@ -70,9 +71,11 @@ internal sealed class TrackerEngine : IDisposable
         TrackerCounters counters,
         TimeProvider clock,
         SchedulerOptions? schedulerOptions = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        CallJournal? journal = null)
     {
         _generation = generation;
+        _journal = journal ?? new CallJournal(generation, clock);
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _win = win ?? throw new ArgumentNullException(nameof(win));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
@@ -132,6 +135,7 @@ internal sealed class TrackerEngine : IDisposable
             kinds |= SignalKinds.Structure;
             if (_gateway is not null)
             {
+                using var op = _journal.Scope(CallSite.Release);
                 _map.SweepDead(_win.IsWindow);               // 04 C: a destroyed window's entry is released at once
             }
         }
@@ -201,6 +205,7 @@ internal sealed class TrackerEngine : IDisposable
         }
 
         _disposed = true;
+        using var op = _journal.Scope(CallSite.Release);
         _map.Dispose();
         _gateway?.Dispose();
         _gateway = null;
@@ -269,6 +274,14 @@ internal sealed class TrackerEngine : IDisposable
             return new EvaluationOutcome(true, false, EvaluationResultKind.Unresolved);
         }
 
+        if (_win.IsHung(frame))
+        {
+            // 04 § M.9: the frame has not pumped for ~5 s; a call into it would wedge this worker. Retry later instead.
+            _counters.CountPreScreened();
+            _publisher.TryPublish(_generation, request.Sequence, null);
+            return new EvaluationOutcome(true, false, EvaluationResultKind.Transient);
+        }
+
         TabEntry<TabHandle>? entry = null;
         bool cached = !request.Rebuild && _map.TryGet(active.Key, out entry);
         if (!cached)
@@ -286,7 +299,12 @@ internal sealed class TrackerEngine : IDisposable
             }
         }
 
-        var read = _gateway!.TryReadPath(entry!.Handle);
+        PathReadResult read;
+        using (_journal.Scope(CallSite.PathRead, _win.ProcessIdOf(frame), frame))
+        {
+            read = _gateway!.TryReadPath(entry!.Handle);
+        }
+
         if (read.Hr < 0)
         {
             return HandleReadFailure(request, frame, active.Key, read.Hr);
@@ -313,7 +331,11 @@ internal sealed class TrackerEngine : IDisposable
             return new EvaluationOutcome(false, false, EvaluationResultKind.Resolved);
         }
 
-        _map.RecordFailure(key, cls);                         // Gone drops the tab; Other drops it after three in a row; Transient keeps it
+        using (_journal.Scope(CallSite.Release))
+        {
+            _map.RecordFailure(key, cls);                     // Gone drops the tab; Other drops it after three in a row; Transient keeps it
+        }
+
         _publisher.TryPublish(_generation, request.Sequence, null);
         return new EvaluationOutcome(true, false, cls == ComFailureClass.Other ? EvaluationResultKind.Unresolved : EvaluationResultKind.Transient);
     }
@@ -321,9 +343,20 @@ internal sealed class TrackerEngine : IDisposable
     /// <summary>One enumeration of <c>IShellWindows</c> (04 C). Enters recovery if the root is gone or is a private empty server.</summary>
     private EvaluationResultKind Rebuild(nint foregroundFrame)
     {
+        if (_win.AnyExplorerFrameHung())
+        {
+            _counters.CountPreScreened();                     // 04 § M.9: an enumeration calls every Explorer process; defer it
+            return EvaluationResultKind.Transient;
+        }
+
         _counters.CountRebuild();
         var found = new List<DiscoveredTab<TabHandle>>();
-        int hr = _gateway!.TryEnumerateTabs(found);
+        int hr;
+        using (_journal.Scope(CallSite.Enumerate, _shellPid))
+        {
+            hr = _gateway!.TryEnumerateTabs(found);
+        }
+
         if (hr < 0)
         {
             DisposeAll(found);
@@ -343,7 +376,16 @@ internal sealed class TrackerEngine : IDisposable
             return EvaluationResultKind.Transient;
         }
 
-        _map.Reconcile(found, foregroundFrame);
+        using (_journal.Scope(CallSite.Release))
+        {
+            _map.Reconcile(found, foregroundFrame);
+        }
+
+        if (found.Count > 0 || !_win.AnyExplorerFrameExists())
+        {
+            _counters.CountFullEnumeration();                 // a validated enumeration answered: evidence for a trial worker (04 § M.5)
+        }
+
         return EvaluationResultKind.Resolved;
     }
 
@@ -389,8 +431,9 @@ internal sealed class TrackerEngine : IDisposable
         return true;
     }
 
-    private static void DisposeAll(List<DiscoveredTab<TabHandle>> found)
+    private void DisposeAll(List<DiscoveredTab<TabHandle>> found)
     {
+        using var op = _journal.Scope(CallSite.Release);
         foreach (var tab in found)
         {
             tab.Handle.Dispose();
@@ -419,9 +462,13 @@ internal sealed class TrackerEngine : IDisposable
             _machine.ShellGone();                             // publishes Inactive and moves to Recovering
         }
 
-        _map.Clear();
-        _gateway?.Dispose();
-        _gateway = null;
+        using (_journal.Scope(CallSite.Release))
+        {
+            _map.Clear();
+            _gateway?.Dispose();
+            _gateway = null;
+        }
+
         _shellPid = 0;
         _unresolvedFrame = 0;
         _validator.Reset();
@@ -466,26 +513,56 @@ internal sealed class TrackerEngine : IDisposable
             return false;
         }
 
-        int hr = _factory.TryCreate(out var gateway);
-        if (hr < 0 || gateway is null)
+        if (_win.AnyExplorerFrameHung())
         {
-            gateway?.Dispose();
+            _counters.CountPreScreened();                     // 04 § M.9: the first enumeration is deferred to the recovery back-off
             return false;
         }
 
+        uint shellPid = _win.ProcessIdOf(shell);
+        int hr;
+        IShellWindowsGateway? gateway;
+        using (_journal.Scope(CallSite.RootCreate, shellPid))
+        {
+            hr = _factory.TryCreate(out gateway);
+            if (hr < 0 || gateway is null)
+            {
+                gateway?.Dispose();
+                return false;
+            }
+        }
+
+        if (gateway is IJournaledGateway journaled)
+        {
+            journaled.AttachJournal(_journal, _win.ProcessIdOf);
+        }
+
         var found = new List<DiscoveredTab<TabHandle>>();
-        hr = gateway.TryEnumerateTabs(found);
+        using (_journal.Scope(CallSite.Enumerate, shellPid))
+        {
+            hr = gateway.TryEnumerateTabs(found);
+        }
+
         bool usable = hr >= 0 && !ShouldRejectRoot(found.Count);
         if (!usable)
         {
             DisposeAll(found);
-            gateway.Dispose();
+            using (_journal.Scope(CallSite.Release, shellPid))
+            {
+                gateway.Dispose();
+            }
+
             return false;
         }
 
         _gateway = gateway;
-        _shellPid = _win.ProcessIdOf(shell);
-        _map.Reconcile(found, 0);
+        _shellPid = shellPid;
+        using (_journal.Scope(CallSite.Release))
+        {
+            _map.Reconcile(found, 0);
+        }
+
+        _counters.CountFullEnumeration();                     // created, enumerated and validated: evidence for a trial worker (04 § M.5)
         return true;
     }
 }

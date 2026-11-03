@@ -20,6 +20,7 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
     private readonly Dictionary<nint, nint> _owner = [];
     private readonly HashSet<nint> _minimized = [];
     private readonly HashSet<nint> _nonExplorerWindows = [];
+    private readonly HashSet<nint> _hung = [];
     private readonly Queue<int> _readFailures = new();
     private int _liveHandles;
     private int _gatewaysCreated;
@@ -68,6 +69,13 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
     public int Reads => Volatile.Read(ref _reads);
 
     public int CreateAttemptsWhileShellDown { get; private set; }
+
+    /// <summary>Runs inside <c>TryCreate</c>, <c>TryEnumerateTabs</c> and <c>TryReadPath</c> (a test looks at the journal mid-call, 04 § M.2).</summary>
+    public Action? DuringCreate { get; set; }
+
+    public Action? DuringEnumerate { get; set; }
+
+    public Action? DuringRead { get; set; }
 
     public void AddTab(nint frame, nint key, string? path, bool visible = true, uint pid = 500)
     {
@@ -158,6 +166,7 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
     public int TryCreate(out IShellWindowsGateway? gateway)
     {
         gateway = null;
+        DuringCreate?.Invoke();
         lock (_gate)
         {
             if (ShellWindow == 0)
@@ -199,6 +208,7 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
         public int TryEnumerateTabs(List<DiscoveredTab<TabHandle>> into)
         {
             Interlocked.Increment(ref owner._enumerations);
+            owner.DuringEnumerate?.Invoke();
             lock (owner._gate)
             {
                 if (owner.EnumerateHr < 0)
@@ -224,6 +234,7 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
         public PathReadResult TryReadPath(TabHandle tab)
         {
             Interlocked.Increment(ref owner._reads);
+            owner.DuringRead?.Invoke();
             bool wasBlocked = false;
             if (Interlocked.Decrement(ref owner.BlockNextReads) >= 0)
             {
@@ -322,6 +333,38 @@ internal sealed class FakeExplorerDesktop : IShellWindowsGatewayFactory, IWin32S
         {
             // a tab whose key equals its frame is the implicit single tab: no ShellTabWindowClass children (04 C)
             return _tabs.Where(t => t.Frame == frame && t.Key != frame).Select(t => new ChildTab(t.Key, t.Visible)).ToList();
+        }
+    }
+
+    /// <summary>Marks a window as not pumping (<c>IsHungAppWindow</c>, 04 § M.9).</summary>
+    public void SetHung(nint hwnd, bool hung = true)
+    {
+        lock (_gate)
+        {
+            if (hung)
+            {
+                _hung.Add(hwnd);
+            }
+            else
+            {
+                _hung.Remove(hwnd);
+            }
+        }
+    }
+
+    public bool IsHung(nint hwnd)
+    {
+        lock (_gate)
+        {
+            return _hung.Contains(hwnd);
+        }
+    }
+
+    public bool AnyExplorerFrameHung()
+    {
+        lock (_gate)
+        {
+            return _hung.Count > 0;
         }
     }
 

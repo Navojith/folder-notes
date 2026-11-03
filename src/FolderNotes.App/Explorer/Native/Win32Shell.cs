@@ -30,6 +30,12 @@ internal interface IWin32Shell
 
     /// <summary>True if any Explorer frame exists (used to tell an empty private root from a real empty one, 04 F).</summary>
     bool AnyExplorerFrameExists();
+
+    /// <summary><c>IsHungAppWindow</c>: the window's thread has not pumped for about 5 s (04 § M.9 pre-screen). Sends nothing.</summary>
+    bool IsHung(nint hwnd);
+
+    /// <summary>True if any Explorer frame (or the shell window) is hung (04 § M.9: an enumeration would call into it).</summary>
+    bool AnyExplorerFrameHung();
 }
 
 internal sealed partial class Win32Shell : IWin32Shell
@@ -86,6 +92,33 @@ internal sealed partial class Win32Shell : IWin32Shell
 
     public bool AnyExplorerFrameExists() => NativeFindWindowEx(0, 0, FrameClass, null) != 0;
 
+    public bool IsHung(nint hwnd) => hwnd != 0 && NativeIsHungAppWindow(hwnd);
+
+    public bool AnyExplorerFrameHung()
+    {
+        if (IsHung(NativeGetShellWindow()))
+        {
+            return true;
+        }
+
+        nint frame = 0;
+        for (int i = 0; i < 512; i++)                    // bounded, like every window walk here
+        {
+            frame = NativeFindWindowEx(0, frame, FrameClass, null);
+            if (frame == 0)
+            {
+                return false;
+            }
+
+            if (NativeIsHungAppWindow(frame))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static unsafe string ClassOf(nint hwnd)
     {
         char* buffer = stackalloc char[64];
@@ -105,6 +138,10 @@ internal sealed partial class Win32Shell : IWin32Shell
     [LibraryImport("user32.dll", EntryPoint = "IsIconic")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool NativeIsIconic(nint hwnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsHungAppWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool NativeIsHungAppWindow(nint hwnd);
 
     [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
     [return: MarshalAs(UnmanagedType.Bool)]

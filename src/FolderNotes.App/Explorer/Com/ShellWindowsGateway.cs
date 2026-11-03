@@ -36,6 +36,15 @@ internal interface IShellWindowsGateway : IDisposable
     PathReadResult TryReadPath(TabHandle tab);
 }
 
+/// <summary>
+/// A gateway that records its per-item operations in the worker's journal (04 § M.2): <c>ItemProbe(i)</c> while the item's
+/// process is unknown, <c>ItemRead(i)</c> once its frame (and so its process) is known.
+/// </summary>
+internal interface IJournaledGateway
+{
+    void AttachJournal(CallJournal journal, Func<nint, uint> processOf);
+}
+
 /// <summary>Creates the root object. Separate so recovery (04 F) can retry creation without a gateway existing.</summary>
 internal interface IShellWindowsGatewayFactory
 {
@@ -98,15 +107,23 @@ internal static class ComWrapper
 /// route: <c>Item(i)</c> → <c>IWebBrowser2.HWND</c> (frame) → <c>QueryService(SID_STopLevelBrowser)</c> →
 /// <c>IShellBrowser.GetWindow</c> (the tab). Only the <c>IShellBrowser</c> is kept, everything else is released at once.
 /// </summary>
-internal sealed class ComShellWindowsGateway : IShellWindowsGateway
+internal sealed class ComShellWindowsGateway : IShellWindowsGateway, IJournaledGateway
 {
     private readonly ComRef<IShellWindows> _root;
     private readonly RcwTracker _tracker;
+    private CallJournal? _journal;
+    private Func<nint, uint> _processOf = static _ => 0;
 
     public ComShellWindowsGateway(ComRef<IShellWindows> root, RcwTracker tracker)
     {
         _root = root;
         _tracker = tracker;
+    }
+
+    public void AttachJournal(CallJournal journal, Func<nint, uint> processOf)
+    {
+        _journal = journal;
+        _processOf = processOf ?? throw new ArgumentNullException(nameof(processOf));
     }
 
     public int TryEnumerateTabs(List<DiscoveredTab<TabHandle>> into)
@@ -134,17 +151,33 @@ internal sealed class ComShellWindowsGateway : IShellWindowsGateway
 
     private void TryAddTab(int index, List<DiscoveredTab<TabHandle>> into)
     {
-        if (_root.Value.Item(Variant.FromInt(index), out var dispatch) != 0 || dispatch is null)
+        // Every call below goes out of process, including the casts (QueryInterface) and the releases of the item (04 § M.2).
+        long probe = _journal?.Open(CallSite.ItemProbe, itemIndex: index) ?? 0;
+        try
         {
-            return;                                        // out of range is S_FALSE; a window closing is a failure: skip either
-        }
+            if (_root.Value.Item(Variant.FromInt(index), out var dispatch) != 0 || dispatch is null)
+            {
+                return;                                    // out of range is S_FALSE; a window closing is a failure: skip either
+            }
 
-        using var item = new ComRef<IDispatchSlots>(dispatch, _tracker);
-        if (item.Value is not IWebBrowser2 browser || browser.get_HWND(out nint frame) != 0)
+            using var item = new ComRef<IDispatchSlots>(dispatch, _tracker);
+            if (item.Value is not IWebBrowser2 browser || browser.get_HWND(out nint frame) != 0)
+            {
+                return;
+            }
+
+            _journal?.Close(probe);
+            probe = _journal?.Open(CallSite.ItemRead, _processOf(frame), frame, index) ?? 0;
+            ReadItem(item, frame, into);
+        }
+        finally
         {
-            return;
+            _journal?.Close(probe);
         }
+    }
 
+    private void ReadItem(ComRef<IDispatchSlots> item, nint frame, List<DiscoveredTab<TabHandle>> into)
+    {
         if (item.Value is not IComServiceProvider services
             || services.QueryService(ComIds.SidSTopLevelBrowser, ComIds.IShellBrowser, out nint raw) != 0
             || raw == 0)
