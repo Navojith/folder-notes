@@ -301,6 +301,14 @@ smoke tests pass.
     recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
     `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
     pass; `AppShell`/`App.xaml.cs` do not start it (guard test).
+  - [ ] **T3.2.6 🧱 Frozen-server quarantine** (NFR-01; 04 § M, ADR-025 amendment 2026-11-03; user decision 1). Built in
+    increments, each with deterministic tests: (1) `CallJournal` + gateway/engine operations + cancel HRESULT; (2) the pure
+    `QuarantineRecord` (entries, suspects, evidence, same-server trial budget) and the state machine's Q1–Q24; (3) the monitor
+    on the watchdog thread, the Win32 server probe and supervisor integration (no replacement on a wedge, trials, release);
+    (4) `Availability` and the M.10 stats; (5) the hang pre-screen (M.9). *Done when:* 06 § Quarantine deterministic and timing
+    tests pass, including the bounds model test; the existing breaker/cap/budget tests still pass (rewritten only where 04 § M
+    changed the expected behaviour); `AppShell` still does not start the tracker (guard test). Real verification is VM plan
+    stage D, part of T3.2.5. Numbered after T3.2.5, but T3.2.5 cannot close before it.
   - [ ] **T3.2.5 ✅ Real-Explorer verification** *(partial 2026-11-03: see 09 O-25/O-26 and `specs/reports/T3.2.5-verification.md`; blocked on two user decisions and a disposable session)*: the integration and reliability tests, the idle-CPU
     measurement, P4 and the gated restart test where a disposable session exists (D5). *Done when:* 06 §
     ExplorerTracker tests pass on this machine (Windows 11 23H2); numbers (latency, evaluation cost, idle CPU,

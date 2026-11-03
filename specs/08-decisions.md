@@ -378,7 +378,7 @@ under the two `shell` parents.
 **Consequences:** A fresh install from source has no menu entry until the user turns it on; the installer meets
 the original "registered on first run" intent. Tests use a scratch registry root, never the real keys.
 
-## ADR-025: ExplorerTracker design: events only, throttled, one STA thread, cancel-then-abandon — *accepted (T3.2 spec, 2026-11-01; user decisions D1–D5, see 09)*
+## ADR-025: ExplorerTracker design: events only, throttled, one STA thread, cancel-then-abandon — *accepted (T3.2 spec, 2026-11-01; user decisions D1–D5, see 09); point 5 amended 2026-11-03 (frozen-server quarantine)*
 
 **Context:** S1 proved the mechanism (ADR-004) and the typed-interop rule (ADR-007). T3.2 turns it into a service
 that must not hurt Explorer, survive Explorer restarts and never block on a hung COM call. Reading the specs and
@@ -445,6 +445,40 @@ O-24 stays open). Elevated Explorer unsupported in v1 (no crash, no retry loop).
 frozen scratch server and in six other adverse cases it returned in ≤ 1.1 ms; `ulTimeout` delays the cancelled call, not the canceller. Accepted
 as is, with the uncertainty recorded: cancel latency is measured and logged, and a contingency (abandon deadline on a threadpool timer armed before the
 cancel, ≤ 1 abandoned watchdog thread) is specified but not built, pending the user's approval and a measured cancel > 50 ms on real Explorer.
+
+**Frozen Explorer (T3.2.5 F2, 2026-11-03; user decision 1; details 04 § B.6, L4, H P6, M).**
+- *Accepted, clarification of point 5.* Cancellation is **best-effort**. Its *latency* (P6: ≤ 1.1 ms; real frozen Explorer: 0.01 ms)
+  and its *effectiveness* are separate properties. Against a frozen real Explorer the cancel returned at once and the call stayed
+  blocked. **Abandonment guarantees bounded waiting on the application side** (no thread that matters waits past the cancel +
+  abandon deadlines; `Stop` ≤ 2 s). **It does not guarantee, cause or detect recovery of the remote server.** The abandoned call stays
+  pending in our process until the server answers or dies. Earlier wording that read as "time-boxing makes a hung Explorer harmless
+  to tracking" claimed too much: it makes it harmless to *us*, not *available*. The P6 contingency stays unbuilt (its trigger, a cancel
+  over 50 ms, was not hit, and it would not help an ineffective cancel). Two facts are added to the record: the cancel HRESULT and the
+  blocked call site.
+- *Approved 2026-11-03 (user decision 1, with safeguards): frozen-server quarantine (04 § M).* **Supersedes** point 5's "abandon the
+  thread and start a new one at +1 s": an abandonment no longer starts a replacement.
+  - *Call journal:* each worker records generation, operation id, site, target pid (where known) and start time before its outgoing
+    COM calls, and clears the record only after they return. A sequence lock plus generation and start-time checks keep a stale or
+    torn record from ever being read as an active call. The `CoCancelCall` HRESULT is kept for diagnosis and is never release evidence.
+  - *Global quarantine:* a new state `Quarantined` (`Waiting` with no worker, `Trial` with one). The record is process-wide (in
+    `TrackerProcessGuard`), so Stop/Start and new tracker instances meet it.
+  - *Release on evidence:* E1, the blocked operation completed (delayed worker completion); E2, the suspect process exited or was
+    replaced (pid + creation time).
+  - *Trial workers:* the health hold (E3: 10 s with no `IsHungAppWindow`, and at least 30 s since the last abandonment, checked every
+    1 s on the existing watchdog thread) is evidence for **attempting** recovery, **not** proof of health. It allows one trial worker:
+    one at a time, 10 s deadline, subject to the cap, and starting it does not clear quarantine. Automatic trials are budgeted **per
+    server** (at most one per suspect, compared conservatively), and each further one needs a new suspect **and** a new full hold. A
+    trial that wedges returns to `Quarantined`. Explicit Retry gets a trial only when no hang evidence is seen, under the breaker and cap.
+  - *Status:* `Availability` distinguishes tracking, temporarily unavailable (shell recovery), quarantined, recovery attempt, paused
+    (breaker) and permanently off (cap).
+  - *Precedence and bounds:* precedence on a wedge is `ThreadCap` > `CircuitBreaker` > `Quarantined`. Breaker 3 / 10 min, cap 6 and
+    the thread budget (10 owned at once) are unchanged and cannot be bypassed (04 § M.8).
+  - *Accepted limitation:* while any entry is unresolved, tracking is suspended for **every** Explorer window, healthy processes
+    included. A fresh worker must enumerate, which calls every Explorer process, and no documented API names a proxy's server.
+    Tracking healthy processes by undocumented `IShellWindows` ordering is **rejected**: correctness and predictable recovery outrank
+    partial tracking.
+  - *Consequence:* the F2 case costs 1 abandoned worker instead of 3 and recovers by itself within about 1 s of the server answering;
+    the same unresponsive server never gets more than one automatic worker. Built in T3.2.6.
 
 **Composition (T3.2.4, 2026-11-03; 04 § L):** one synchronous `TrackerEngine` per worker (empty cache, its own generation) runs only on the worker and owns no
 thread or timer; `ExplorerTracker` composes it with the machine, publisher, router, hook thread, watchdog and supervisor; recovery and root replacement run on the

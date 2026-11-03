@@ -144,9 +144,44 @@ interop. The person's desktop is in use, so an attempt that fails while a foreig
 (at most 3 times) and the attempt number is reported. Hook callbacks are counted by a decorator in the test, not in
 `TrackerStats`. Results go to `artifacts/t325/` and the report `specs/reports/T3.2.5-verification.md`.
 
-**Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, a new thread
-serves the next signal, the old thread's late result is discarded (generation), the UI thread is never blocked,
-`Stop` returns in ≤ 2 s even while wedged.
+**Destructive scenarios run only in the disposable VM (user decision 2, 2026-11-03).** *Destructive* means anything that can take down,
+freeze or overload Explorer: window/tab churn, freezing a process, killing the shell, P4, P7. Those tests carry
+`[Trait("Destructive", "true")]` and run only when `FOLDERNOTES_REAL_EXPLORER=disposable` is set **and** the machine identifies as a
+VM (SMBIOS manufacturer/model, e.g. `innotek GmbH` / `VirtualBox`). Otherwise they are skipped with that reason. The environment
+variable alone is not enough. Until O-26 is understood, the non-destructive real-Explorer tests also run in the VM only. The host's
+T3.2.5 numbers are kept as they are (labelled "dev desktop, 2026-11-03"); VM numbers are reported next to them, never in their
+place. Run plan: `specs/reports/T3.2.5-vm-test-plan.md`.
+
+**Evaluation cost: internal time versus COM waiting (T3.2.5, S1).** The engine times each evaluation as a whole and, separately, the
+time spent inside outgoing COM calls (each gateway call: create, enumerate, read path, release). `TrackerStats` reports three
+distributions (p50/p95/max, last 256): **total**, **COM wait** (time Explorer took to answer, including its UI thread being busy) and
+**internal** (total minus COM wait: our own work). The < 10 ms evaluation target of 04 § C is checked against *internal*, with
+*total* reported next to it. End-to-end latency (≤ 150 ms, REQ-031) is still measured and covers COM waiting. *Whether REQ-031's text
+should change to say so is the user's call (O-27 S1); until then the report shows both and marks p95 of total as "over target,
+COM-bound".*
+
+**Idle CPU method (T3.2.5 re-measure, VM).** The first measurement was invalid (the calibration spin fell inside the baseline). The
+method is: a quiet VM (Defender real-time and scheduled scans off for the test folder or the session, Windows Update paused, Search
+indexing and SysMain stopped, no other app, 10 min settle after boot); one warm-up run of the tracker for 60 s that is not reported
+(JIT tier-up); then, alternating 5 times, **baseline** (same test process, tracker constructed but not started, Explorer foreground,
+untouched) and **tracker** (started, same conditions), 60 s each. CPU = `QueryProcessCycleTime` delta of the test process converted
+with a cycles-per-ms factor that is measured **before** the first window and outside every window. Report median and max of
+*tracker − baseline* as % of one core, plus `TrackerStats` evaluation and callback counts per window. Inside a VM, absolute numbers
+are indicative. The pass criterion is the delta against the baseline taken in the same VM run.
+
+**Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, **no new thread
+while the block lasts** (`Quarantined`, 04 § M; changed 2026-11-03), the old thread's late result is discarded
+(generation), the UI thread is never blocked, `Stop` returns in ≤ 2 s even while wedged. When the block ends (E1) a
+worker serves the next signal within 1.5 s.
+
+**Quarantine (T3.2.6, 04 § M.11):** deterministic tests for every transition Q1–Q24 on the pure machine and record with a
+fake clock and a fake server probe (process exit, pid reuse, hang evidence); the same-server rule and at most one automatic
+trial per server; the hold restarts on hang evidence; the 30 s minimum; the 10 s trial deadline (pass, inconclusive, wedge);
+the journal (sequence-lock torn reads are indeterminate, a stale or dangling record is never active, operations nest gateway
+inside engine); the cancel HRESULT never releases; the record survives Stop/Start and a new instance; and a seeded random
+model test that applies event sequences and asserts the bounds of 04 § M.8 after every step (live workers ≤ 1, abandoned
+≤ 6 and never decreasing, no automatic trial twice for one server). Timing tests (real threads, fake blocking gateway): no
+worker while `Waiting`, release after the block ends, trial deadline, Retry refusals.
 
 **Integration (real Explorer, interactive desktop, `Category=Explorer`; the S1 scenarios promoted to tests):** navigate
 (different names, same-named folders, Unicode path), virtual folder → `null`, new tab, switch tab (both directions),

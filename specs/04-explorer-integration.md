@@ -93,7 +93,8 @@ The tracker is split so almost everything can be unit-tested without Explorer:
 | `TabMap` | pure | The browser→tab cache (§C). |
 | `EvaluationScheduler` | pure state machine, takes a `TimeProvider` | The coalescing rules (§D). |
 | `ComFailureClassifier` | pure | HRESULT → `Transient` / `Gone` / `Other` (§B.5). |
-| `TrackerStateMachine` | pure | `Stopped → Running ⇄ Recovering`, `Wedged → Running`, `Disabled` (§B.6, §F). |
+| `TrackerStateMachine` | pure | `Stopped → Running ⇄ Recovering`, wedge → `Quarantined` (`Waiting` ⇄ `Trial`) → `Running`, `Disabled` (§B.6, §F, §M). |
+| `CallJournal`, `QuarantineRecord` | pure + sequence lock | The blocked-operation record per worker; the process-wide quarantine entries, evidence and trial budget (§M). |
 | `SignalRouter` | pure + one `Interlocked` word | The pending-signal bits and the current worker's wake-up target; `Attach`/`Detach` (§B.7). |
 | `HookThread` | Win32 glue (no COM) | The dedicated hook thread: message loop, install/re-scope/uninstall, trivial callbacks (§B.7). |
 | `TrackerThreadBudget` | pure (in `TrackerProcessGuard`) | Process-wide thread counters per kind: live and abandoned (§B.6). |
@@ -152,10 +153,21 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
      been shown against Explorer itself, which we will not hang.
    - *Abandon.* If the evaluation is still blocked **1 s (tunable)** after the cancel (cancellation only works for
      calls through a COM proxy, and not inside non-COM waits), the thread is declared **wedged**: the watchdog
-     bumps the `generation`, publishes `Inactive`, abandons the thread (background thread, never joined) and
-     starts a fresh STA thread with an empty cache. Anything the old thread later produces carries the old
+     bumps the `generation`, publishes `Inactive` and abandons the thread (background thread, never joined).
+     **No replacement starts at once** (changed 2026-11-03, § M): the tracker enters `Quarantined` and a new
+     worker (with an empty cache) starts only on the evidence rules of § M. Anything the old thread later produces carries the old
      generation and is dropped. Abandoned COM objects are **not** released from another thread (it could
      deadlock); they are leaked once, deliberately.
+   - *What abandonment guarantees, and what it does not (user decision 1, 2026-11-03, T3.2.5 F2).* Abandonment
+     bounds **our own waiting**: no Folder Notes thread that matters (UI, publisher, `Stop`) waits more than the
+     cancel + abandon deadlines (1.25 s after the evaluation began; `Stop` ≤ 2 s). It does **not** unblock the
+     stuck call, repair the remote server or tell us when that server is healthy again. The abandoned call stays
+     pending inside our process until the server answers or dies. Two properties of cancellation are kept apart:
+     *cancel latency* (how long `CoCancelCall` itself takes; ≤ 1.1 ms in P6, 0.01 ms against a frozen real
+     Explorer) and *cancel effectiveness* (whether the blocked call then returns; yes against the frozen scratch
+     server in P6, **no** against a frozen real Explorer in T3.2.5 F2). Cancellation is **best-effort** and nothing
+     relies on it working. What happens *after* an abandonment (no immediate replacement against the same server,
+     global quarantine, release on evidence) is § M (approved 2026-11-03).
    - *Circuit breaker.* 3 wedges within 10 min → `Disabled` (reason `CircuitBreaker`): publish `Inactive`, log once,
      and Settings shows "Explorer tracking paused after repeated problems" with a **Retry** (T3.4). It never retries by
      itself in a loop. An explicit Retry clears the breaker's wedge window and allows one more recovery cycle.
@@ -368,7 +380,7 @@ Not every Explorer event can be observed reliably. Each limit and what the desig
 | L1 | WinEvents are asynchronous, unordered relative to COM state, can be coalesced or dropped under load, and `NAMECHANGE` does not guarantee the *path* changed. | Every event only means "re-read"; truth is read from the shell; the poll and the 30 s reconciliation stay. |
 | L2 | There is **no documented event for "active tab changed"** or "navigation committed". S1 saw `NAMECHANGE` / `SHOW` / `HIDE` fire for them on build 22631; that is observed behaviour, not a contract, and may differ on 24H2 and later builds, and on Windows 10. | Poll fallback stays; the T3.5 matrix runs on 3 builds; without the tab class the logic degrades to one implicit tab. |
 | L3 | Out-of-context hooks need a message loop. **Measured (S5/P2):** while a hook-owning STA thread waits inside an outgoing COM call, COM's wait loop still dispatches WinEvent callbacks to it (7 during one 257 ms call), but not posted thread messages. | Hooks live on a separate COM-free hook thread (§B.7, Q2), so no callback runs inside a COM wait; callbacks only set a bit and post one message (§B.4); time-boxed calls (§B.6). |
-| L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. Its own latency is undocumented; measured ≤ 1.1 ms in every case tried (§ H, P6). | Cancel, then abandon the thread; circuit breaker; cancel latency is measured and logged; contingency design in § H P6. |
+| L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. Its own latency is undocumented; measured ≤ 1.1 ms in every case tried (§ H, P6). **Its effectiveness is not guaranteed either:** against a frozen real Explorer it returned at once and the call stayed blocked (T3.2.5 F2). | Cancel (best-effort), then abandon the thread; circuit breaker; cancel latency is measured and logged; contingency design in § H P6. Abandonment bounds our waiting, not the server's recovery (§ B.6); what follows an abandonment is § M (global quarantine, release on evidence). |
 | L5 | `IShellWindows` registers a window after its HWND exists and removes it around the HWND's destruction. | Retry ladder; `IsWindow` and `Gone` checks; reconciliation. |
 | L6 | `TaskbarCreated` is broadcast only to top-level windows, only when a taskbar is created, and not when the shell restarts without one. | Forwarded from the tray window **and** detected independently (`Gone`, shell process change). |
 | L7 | `CLSID_ShellWindows` can be served by a private, empty `rundll32.exe` server (§F). | Gate on the shell window; validate the enumeration. |
@@ -476,6 +488,12 @@ worker would not be replaced (the UI stays responsive; the panel would show no f
 needs the user's approval because it changes the thread budget):** arm a threadpool timer for the abandon deadline *before* issuing the cancel, so
 abandonment never depends on the cancel returning; if the watchdog is found stuck, abandon it too and start one new watchdog (budget: ≤ 1 abandoned
 watchdog thread, owned-at-once 10 → 11). Trigger: any measured cancel > 50 ms on a real Explorer in T3.2.5.
+*Real Explorer (T3.2.5 F2, 2026-11-03):* against a lab-owned `/separate` explorer.exe frozen with `NtSuspendProcess`, the cancel returned in
+**0.01 ms** (trigger not hit, contingency stays unbuilt) and **the blocked call did not return** until the process was resumed (~12 s). So
+latency is fine and effectiveness is not. Two facts were not recorded and must be before any conclusion about *why*: `CoCancelCall`'s
+HRESULT (the watchdog discards it; `0x8001011E` would mean the worker was not in a cancellable COM wait at all) and which call was blocked
+(read on a cached tab, or the enumeration of a replacement). Both are added by § M.2 and probe P7 (VM). The contingency would not help:
+the cancel is not slow, it is ineffective.
 
 **P4** (shell down, `rundll32` private server) is not run: it needs Explorer killed (D5). It stays open as O-24.
 
@@ -543,6 +561,187 @@ Written before the code. COM ownership stays on the worker; nothing here is star
 - **Stats.** `TrackerStats`: evaluations, rebuilds, recoveries, published states, evaluation p50/p95/max ms (last 256), wedges (abandoned workers),
   replacements, live RCWs, cross-thread releases, hooks active, cancel calls and `MaxCancelCallMs`, state and disabled reason, tab entries.
 - **DI.** `AddExplorerTracker(IServiceCollection)` registers `IExplorerTracker` as a singleton that is *not started*; `App.xaml.cs` does not call it until T3.4.
+
+#### M. Frozen-server quarantine (**APPROVED 2026-11-03**, user decision 1 + safeguards; built in T3.2.6)
+
+*Why (T3.2.5 F2).* When a COM server never answers, cancellation may not release the call (§ B.6, L4). Before this section the
+supervisor started a replacement at once. The replacement enumerated `IShellWindows` again, touched the same frozen process and wedged
+too. After three wedges in about 3 s the tracker was `Disabled` until the user retried. The COM architecture is kept (one STA worker,
+cancel at 250 ms, abandon at +1 s, the generation gate, breaker 3 / 10 min, lifetime cap 6, thread budget ≤ 3 live / ≤ 7 abandoned).
+Only **what happens after an abandonment** changes. **Supersedes** the "starts a fresh STA thread" step of § B.6.
+
+**M.1 Rules.** (1) Cancellation is best-effort. A successful cancel *request* is never taken as proof that the remote operation ended.
+(2) The abandon deadline is the backstop. (3) On abandonment, identify the unresponsive server where possible (M.2). (4) No worker is
+started automatically against an unresolved server, except a trial worker under M.5. (5) Quarantine is **global**: while any entry is
+unresolved, tracking is suspended for **all** Explorer windows, including those in healthy processes (M.3, accepted limitation).
+(6) Resume on evidence only (M.4). (7) Retry, Stop/Start and new tracker instances respect quarantine (M.6). (8) Breaker, cap and thread
+budget are unchanged and cannot be bypassed (M.8). No new thread and no extra cancellation thread.
+
+**M.2 Call tracking (the journal).** Each worker host owns one `CallJournal`. The worker opens an **operation** before its first
+outgoing COM call and closes it only after the last call of that operation has returned (in a `finally`). An operation spans
+consecutive calls to one target, because casts (`QueryInterface`) and releases on a proxy are outgoing calls too. A record holds:
+`Generation` (the worker's), `OperationId` (monotonic per journal, never reused), `Site`, `TargetPid` (0 = not known), `FrameHwnd`,
+`ItemIndex` and `StartedAt` (timestamp). There are two levels: the engine's operation, and an inner one the gateway opens per
+enumerated item. The snapshot reports the innermost active one.
+
+| Site | Opened by | Calls covered | Target |
+|---|---|---|---|
+| `RootCreate` | engine | `CoCreateInstance(ShellWindows)` + wrap | shell pid (probable; L7 may hand out a private server) |
+| `Enumerate` | engine | `get_Count`, then each item | shell pid while no item is open |
+| `ItemProbe(i)` | gateway | `Item(i)`, the cast and `get_HWND` | **unknown** (no documented API names a proxy's server before the call) |
+| `ItemRead(i)` | gateway | `QueryService`, `GetWindow` and the wraps, after `get_HWND` returned | `GetWindowThreadProcessId(frame)`: known |
+| `PathRead` | engine | `TryReadPath` | process of the foreground frame: known |
+| `Release` | engine | map sweeps and drops, gateway and map disposal | unknown (may span several processes) |
+
+*Stale or incomplete records are never read as active calls.* Writes use a sequence lock: the version is odd while a record is being
+written, and the writer is the worker thread only. A reader retries at most 4 times, and a record whose version is odd or changed
+during the read is reported as **indeterminate**. A record is **active** only if all of these hold: the version is even, the active
+flag is set, `Generation` is the host's generation, and `StartedAt` is not earlier than the start of the evaluation the watchdog is
+timing. Each `Evaluate` bracket begins by checking that no operation was left open; a dangling one is closed and counted as a defect
+(`JournalDefects` in stats; a test asserts 0). Indeterminate, inactive or stale records give an **unknown** suspect, never a known one.
+*Cancel result.* The watchdog stores the HRESULT of each `CoCancelCall` with the worker it targeted (`LastCancelHr`). It is diagnostic
+only and is never used as release evidence (rule 1).
+
+**M.3 Suspects, and why quarantine is global.** At abandonment the supervisor copies the snapshot into a quarantine **entry**:
+`{zombie host, snapshot, suspect, cancel HRESULT, abandonedAt}`. The suspect is:
+- **known**: an active record with `TargetPid` ≠ 0;
+- **candidates**: an active record without a pid; then every process that owns a `CabinetWClass` frame, plus the shell (at most 8,
+  otherwise unknown);
+- **unknown**: no active record, or an indeterminate or stale one.
+
+A process identity is **pid + creation time**, so a reused pid is never mistaken for the old process. A fresh worker has an empty
+cache, so its first act is an enumeration, which calls into every Explorer process. The tracker therefore cannot leave out one process.
+This is why quarantine is global and why no worker runs while an entry is unresolved, except a trial (M.5). The user accepted this
+limitation (2026-11-03). Positional skipping through undocumented `IShellWindows` ordering is **rejected** and will not be used.
+
+**M.4 Evidence.**
+- **E1, the blocked operation completed (delayed worker completion).** The zombie's journal shows that the recorded operation has ended
+  (an inactive record, or a higher `OperationId`), or the zombie thread exited. The server answered *that* operation. E1 resolves its
+  entry whatever the suspect kind. A late zombie never publishes (generation), never re-scopes hooks, and **never refunds the lifetime
+  cap**.
+- **E2, the server ended or was replaced.** No process with the suspect's identity runs any more (exited, or the pid now belongs to a
+  process with another creation time). The shell counts as replaced when its process ended. E2 resolves a *known* entry, or a
+  *candidates* entry once every candidate has ended. It never resolves an *unknown* entry.
+- **E3, health hold: evidence for attempting recovery, not proof of health.** For at least **10 s** without a break, no hang evidence
+  was seen, and at least **30 s** (minimum quarantine) have passed since the most recent abandonment in the record. *Hang evidence*
+  means `IsHungAppWindow` is true for any frame of a suspect, or for any Explorer frame when a suspect is unknown, or for the shell
+  window when the shell is a suspect. A hold that sees hang evidence starts again from zero. E3 only allows a **trial worker** (M.5). It
+  never resolves an entry, because a pumping UI thread does not prove that the COM call will be answered. A suspect with no window
+  shows no hang evidence, so its hold completes on time alone.
+- **Not evidence:** time alone; a Retry; a cancel request returning `S_OK`.
+
+*Monitor.* It runs on the **existing watchdog thread**, which then waits on its event with a **1 s** timeout instead of an infinite
+wait. Each tick checks E1, E2 and hang evidence, narrows a candidate set to a known suspect when exactly one candidate shows hang
+evidence, and decides on a trial or a release. It uses only Win32 calls that send nothing to Explorer: `OpenProcess`
+(`PROCESS_QUERY_LIMITED_INFORMATION`) with `GetProcessTimes`/`GetExitCodeProcess` (the handle is closed at once, none is kept),
+`FindWindowEx` for `CabinetWClass`, `GetWindowThreadProcessId`, `IsHungAppWindow` and `GetShellWindow`. The watchdog still touches no
+hook and no COM object. When no entry is unresolved, the watchdog waits as before (no idle cost). Sampling every 1 s can miss a hang
+shorter than a second; that is accepted. *Depends on probe P7 (VM, VM plan stage D):* if `IsHungAppWindow` turns out not to report a
+frozen or busy frame, hang evidence is always false. Holds then complete on time alone, and the bounds of M.8 still hold.
+
+**M.5 Trial workers.**
+- *Permission.* At most **one trial worker at a time** (it takes the single live-worker slot). A trial starts only if the abandoned
+  count is below the lifetime cap; otherwise the state is already `Disabled (ThreadCap)`. Starting a trial **does not clear the
+  record**: entries stay until E1/E2 or a passed trial.
+- *Automatic trials are budgeted per server.* When E3 completes, an automatic trial starts only if at least one unresolved entry's
+  suspect has not yet had an automatic trial in this record. Starting the trial marks **every** current suspect as *tried*. Two suspects
+  count as the **same server** if they are the same identity, if either is unknown, or if their candidate sets intersect
+  (conservative). So the same unresponsive server gets **at most one automatic trial**. After a failed trial, another automatic trial
+  needs **both** a new, different suspect (which only a new wedge produces) **and** another complete health hold. The number of
+  automatic workers is therefore bounded by the number of distinct wedges, which the breaker and the cap bound.
+- *Deadline: 10 s from the trial worker's start.* A trial **passes** at the deadline if it was not abandoned **and** completed at least
+  one full enumeration (`RootCreate` + `Enumerate` returned success with the root validated, § F). Passing clears the record (state →
+  `Running`). A trial that reaches the deadline without one is **inconclusive**: it is stopped within the normal bound (≤ 2 s), and
+  if it does not end it is abandoned and counted as a wedge. The state returns to `Quarantined (Waiting)`, the hold restarts, and the
+  suspects stay tried.
+- *Wedge.* A trial worker abandoned by the watchdog, or not started within the start timeout, goes through the normal wedge
+  accounting (cap, then breaker). Otherwise the state returns to `Quarantined (Waiting)` with the new entry merged, and the hold restarts.
+- *During a trial* the trial worker publishes like any worker (generation-gated). A failure publishes `Inactive`, as every abandonment
+  does. Its status is shown as a recovery attempt, not as tracking (M.7).
+
+**M.6 State transitions.** `TrackerState` gains `Quarantined`, with the sub-states `Waiting` (no worker) and `Trial` (one trial worker).
+The quarantine record lives in `TrackerProcessGuard`, which is process-wide like the cap. Precedence on a wedge: `ThreadCap` >
+`CircuitBreaker` > `Quarantined`. Every abandonment, from any state, goes through `TrackerProcessGuard.AbandonThread` (cap) and the
+breaker window.
+
+| # | From | Event | Guard | To | Actions |
+|---|---|---|---|---|---|
+| **Entering** | | | | | |
+| Q1 | Running / Recovering | worker abandoned | lifetime cap reached | Disabled (`ThreadCap`) | entry recorded (stats only); permanent, as before |
+| Q2 | Running / Recovering | worker abandoned | breaker trips | Disabled (`CircuitBreaker`) | entry added; Retry follows Q22/Q23 |
+| Q3 | Running / Recovering | worker abandoned (incl. a recovery attempt, suspect = shell) | otherwise | Quarantined.Waiting | generation bumped + `Inactive` (as before); entry added; **no replacement**; hold starts at zero |
+| **Waiting** | | | | | |
+| Q4 | Q.Waiting | tick: every entry resolved (E1/E2) | — | Running | record cleared; one worker started (reserved; hooks untouched) |
+| Q5 | Q.Waiting | tick: E3 complete | some suspect not yet tried; abandoned < cap | Q.Trial | one trial worker; all current suspects marked tried; record kept |
+| Q6 | Q.Waiting | tick: E3 complete | every suspect tried | Q.Waiting | nothing (no automatic worker; waits for E1/E2/Retry) |
+| Q7 | Q.Waiting | tick: hang evidence | — | Q.Waiting | hold restarts at zero; a candidates entry with exactly one hung candidate becomes known |
+| **Trial** | | | | | |
+| Q8 | Q.Trial | deadline (10 s): not abandoned and ≥ 1 full enumeration | — | Running | record cleared; the trial worker continues as the normal worker |
+| Q9 | Q.Trial | deadline: no full enumeration | — | Q.Waiting | trial stopped (≤ 2 s; abandoned and counted if it does not end); hold restarts; suspects stay tried |
+| Q10 | Q.Trial | trial worker abandoned or did not start (**repeated trial failure**) | Q1/Q2 first | Q.Waiting | entry merged; hold restarts; next automatic trial only for a not-yet-tried suspect (M.5) |
+| Q11 | Q.Trial | every entry resolved by E1/E2 before the deadline | — | Running | record cleared; the trial worker becomes the normal worker |
+| **Delayed completion / replacement (any state with a record)** | | | | | |
+| Q12 | any | a zombie's operation completes or its thread exits (E1) | — | — | that entry resolved; if the record is then empty: Waiting → Q4, Trial → Q11, Disabled → Q14, Stopped → cleared at the next Start (Q17). Never publishes, never refunds the cap |
+| Q13 | any | a suspect's process exits or its pid is reused (E2, incl. a **shell restart**) | — | — | as Q12. After a shell replacement the next worker connects to the new shell, or enters `Recovering` by itself (§ F) if the shell window is not back yet |
+| Q14 | Disabled (`CircuitBreaker`) | record becomes empty | — | Disabled | no automatic restart (the breaker latch stands); a later Retry follows Q23 |
+| **Stop / Start** | | | | | |
+| Q15 | Q.Waiting | Stop | — | Stopped | monitor stops with the watchdog; record kept |
+| Q16 | Q.Trial | Stop | — | Stopped | trial worker stopped (≤ 2 s; abandoned and counted if it does not end); its suspects stay tried; record kept |
+| Q17 | Stopped | Start (this or a **new tracker instance**) | record unresolved after an immediate E1/E2 check | Q.Waiting | hooks and watchdog started, no worker; hold starts at zero |
+| Q18 | Stopped | Start | record empty (or resolved by that check) | Running | as before |
+| **Retry** | | | | | |
+| Q19 | Running / Recovering / Stopped | Retry | — | unchanged | `NotDisabled` (as before) |
+| Q20 | Q.Trial | Retry | — | Q.Trial | refused: `TrialInProgress` |
+| Q21 | Q.Waiting | Retry | hang evidence now → refused `ServerNotResponding`; otherwise abandoned < cap | Q.Trial | an **explicit** trial: needs no hold and no untried suspect; record kept; breaker and cap apply to its wedge |
+| Q22 | Disabled (`CircuitBreaker`) | Retry | record unresolved: hang evidence → refused `ServerNotResponding` (window kept); otherwise abandoned < cap | Q.Trial | breaker window cleared (Q1 rule), explicit trial |
+| Q23 | Disabled (`CircuitBreaker`) | Retry | record empty, abandoned < cap | Running | as before |
+| Q24 | Disabled (`ThreadCap`) | Retry | — | Disabled | `ThreadCapReached` (as before) |
+
+*Worked example: one frozen process, repeated failures.* Wedge 1 → Waiting. After ≥ 30 s with a 10 s clean hold → automatic trial.
+The trial wedges (wedge 2) → Waiting, and the suspect is tried, so no more automatic trials. The user presses Retry while the window
+looks fine → explicit trial. It wedges (wedge 3) → breaker → `Disabled (CircuitBreaker)`. Retry is refused while hang evidence
+remains; once allowed, its trial wedge (4) is followed by Q22 again… until the 6th abandonment → `ThreadCap`. Abandoned workers never
+exceed 6, and no worker was ever started automatically twice against the same server. If the process is resumed at any point, E1
+resolves the record within about 1 s.
+
+**M.7 Status shown to the user.** `TrackerStats.Availability` (and the T3.4 Settings card) distinguishes:
+
+| Availability | When | Meaning for the user |
+|---|---|---|
+| `Tracking` | Running | normal |
+| `TemporarilyUnavailable` | Recovering (shell down or restarting, § F) | resumes by itself, nothing to do |
+| `Quarantined` | Quarantined.Waiting | "An Explorer window is not responding. Tracking resumes when it responds or is closed." Retry offered (may be refused with a reason) |
+| `RecoveryAttempt` | Quarantined.Trial | trying again; no action offered |
+| `Paused` | Disabled (`CircuitBreaker`) | "paused after repeated problems", Retry (§ B.6) |
+| `PermanentlyOff` | Disabled (`ThreadCap`) | off until Folder Notes restarts, no Retry button (§ B.6) |
+| `Stopped` | Stopped | panel off |
+
+The wording belongs to T3.4 and spec 05.
+
+**M.8 Bounds: cannot be bypassed.** (a) *Live workers ≤ 1:* a trial and a normal worker share the one slot
+(`TryReserveThread(Worker)`), and Waiting holds none. (b) *Lifetime cap 6:* every abandonment (wedge, start timeout, trial deadline
+stop, `Stop`) goes through `AbandonThread`. Trials and Retry check `abandoned < cap` first. E1 never decrements the count. The record
+and the count are both process-wide. (c) *Breaker 3 / 10 min:* every wedge counts, trial wedges included; only an explicit Retry clears
+the window (Q22, as Q1 decided). (d) *Threads:* the monitor runs on the watchdog thread. No thread is added; with the watchdog's 1 s wait
+the owned-at-once maximum stays 10. (e) *One tracker per process:* unchanged. A new instance meets the same record (Q17).
+(f) *Automatic workers per server ≤ 1* (M.5). Residual risk, unchanged: a server that is merely slow costs an abandoned worker each time
+(VM plan stage C measures how often).
+
+**M.9 Hang pre-screen (depends on P7).** Before a `PathRead`, if `IsHungAppWindow(frame)` is true, return `Transient` without calling
+(retry ladder, § D.4). Before an enumeration, if any Explorer frame is hung, defer it (`Transient`). This avoids a wedge, and therefore
+an abandoned worker, for a window that has already been hung for more than 5 s (the Windows threshold). It cannot catch a freeze younger
+than that.
+
+**M.10 Observability.** `TrackerStats`: `Availability`, `QuarantineEpisodes`, unresolved entries (site, suspect kind and pid, age),
+releases by E1, E2 and passed trial, trials started (automatic/explicit), passed, inconclusive and wedged, `LastCancelHr`,
+`LastWedgeSite`, `JournalDefects`. Logged once at each entry and release.
+
+**M.11 Tests.** Deterministic, with a fake clock and a fake server probe: every row Q1–Q24; the same-server rule; at most one automatic
+trial per server; holds that restart on hang evidence; the 30 s minimum; pid reuse is not E1/E2; journal sequence-lock torn reads are
+indeterminate; a stale or dangling record is never active; the cancel HRESULT never releases; the record survives Stop/Start and a new
+instance; the cap and live-worker limit hold across trial loops (a model test that drives random event sequences and asserts M.8 after
+each step). Timing: supervisor + watchdog with a blocking fake gateway (no worker while Waiting; release ≤ 1.5 s after the block ends;
+trial deadline). Real, **VM only**: VM plan stage D.
 
 #### K. Interpretations fixed while building the COM layer and thread hosts (T3.2.3, 2026-11-03)
 
