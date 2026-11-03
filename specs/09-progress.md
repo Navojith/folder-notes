@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-03 · **Current phase:** Phase 2 (App shell) · **Current task:** T3.2.3 COM layer and thread hosts, in progress (Q1/Q2 answered and specified; T3.2.2 done; T2.9 partial, see O-22)
+**Last updated:** 2026-11-03 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.4 `ExplorerTracker` composition (T3.2.3 done; T3.2.2 done; T2.9 partial, see O-22)
 
 ---
 
@@ -47,7 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
-| T3.2.3 COM layer and thread hosts | 🟡 partial | 2026-11-03 | not committed | Steps 1-2 done: Q1 (cap 6, `ThreadCap` permanent, process-wide budget) and Q2 (`SignalRouter`, `HookThread`); App 480 → 537. Step 3 (typed COM, `ComRef`, gateway, worker host, watchdog thread) not started |
+| T3.2.3 COM layer and thread hosts | ✅ | 2026-11-03 | `16d4f2b` (steps 1-2) + this commit | Q1 (cap 6, `ThreadCap` permanent, process-wide budget), Q2 (`SignalRouter`, `HookThread`), typed COM interfaces, `ComRef`, `ComShellWindowsGateway`, STA `StaWorkerHost`, `WatchdogThread`, `WorkerSupervisor`; App 480 → 561, Core 396. Interpretations in 04 § K |
 | T3.2.2 Tracker pure logic | ✅ | 2026-11-01 | this commit | `TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine` (+ publisher, watchdog, resolvers, root validator); 146 new tests, App 334 → 480, Core 396; no COM/Win32 (guard test); 4 mutation checks caught. Spec 04 § I records the interpretations; Q1/Q2 open |
 | T3.2.1 Tracker probes (S5) | ✅ | 2026-11-01 | this commit | P1 interop validated vs SDK headers, P2 `CoCancelCall` works on an out-of-process proxy, P3 one path route (0.36 ms), P5 scoped hooks remove foreign callbacks; P4 deferred (D5). Spec corrected (release API, `Gone` via `IsWindow`, `LocationURL` dropped) |
 | T3.1 Context menu verbs | ✅ | 2026-11-01 | `2772509` + this commit | ADR-024: installer-only registration, manual toggle + Repair in Settings, never automatic. Both live checks passed: Settings card by UIA (Off/On/Stale/Repair/forced failure) and the real Explorer menu (folder and background verbs, special-character path, unregister removes both) |
@@ -168,6 +168,20 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-03 (T3.2.3 step 3: COM layer, worker host, watchdog, supervisor; T3.2.3 done)
+- **Checkpoint first:** the router race is now tested deterministically (test seams `GapInConsume`/`GapInRaise`, four forced interleavings; the swapped-order mutant fails every time instead of sometimes); diff reviewed against the specs; committed as `16d4f2b`.
+- **Built (`Explorer/Com/`, `Explorer/Native/`):** the S5-validated `[GeneratedComInterface]` set (order is the ABI; not reordered), `ComRef<T>` (`ComObject.FinalRelease`, idempotent) with `RcwTracker` (live count, cross-thread releases), `IShellWindowsGateway` + `ComShellWindowsGateway` (typed, HRESULT-returning, never throws) and factory, `StaWorkerHost` (STA, `CoEnableCallCancellation`, loop, everything runs on it, exceptions swallowed), `WatchdogThread` (event-wait; `CoCancelCall` then wedge report), `WorkerSupervisor` (detach → generation bump + `Inactive` → one replacement → attach; bounded start/stop; breaker/cap through the state machine).
+- **Tests:** App 537 → 561 (24 new: ComRef, fake gateway through the real `TabMap`, real `IShellWindows` on a real STA worker with the live-RCW count at 0, host/watchdog/supervisor with real threads at a 60/120 ms scale: cancel-then-abandon, one replacement, zombie cannot publish or take signals, idle = no cancel, breaker, one Retry, 6-abandoned permanent exhaustion with Retry refused, bounded Stop while wedged, a second tracker refused, a worker that never starts, source guards). Core 396. Full App suite run 3 times, stable. Mutations: not detaching the old worker survived at first (only matters when no replacement follows), so the breaker and cap tests now assert the router ends detached and it fails; skipping `MarkAbandoned` fails 2 tests; both reverted.
+- **Changes to the state machine made on the way (spec 04 § K):** `Stop(workerAbandoned)` counts a worker that would not end against the lifetime cap (not the breaker); `Start` is refused when the cap is used up, even for a new object.
+- **Limits and open concerns:**
+  - The real-COM tests only read `IShellWindows` on this desktop; they prove typed interop, release bookkeeping and no crash, not path parity or latency (T3.2.5).
+  - `CoCancelCall` against a worker that is *not* in a COM call is a harmless no-op here; the real cancel path was proven only in S5/P2 on a scratch server, never on Explorer (D4). In these tests the stuck worker waits on a plain event, so only abandonment is exercised.
+  - `FinalRelease` is counted, not observed from Explorer's side.
+  - Time-based tests use real threads with short limits; they passed 3 of 3 full runs but are timing-dependent in principle (waits are generous, 5 s).
+  - The watchdog thread itself blocking in `CoCancelCall` is not handled (pre-existing risk; undocumented behaviour of the API).
+  - Nothing is wired into `AppShell`; no evaluation logic exists yet.
+- **Next:** T3.2.4 (composition: evaluation on the worker, hook-scope policy, recovery, poll, publishing, DI).
 
 ### 2026-11-03 (Q1/Q2 specified, T3.2.3 started)
 - **Specs first, no contradiction found:** 04 § B.6 (cap 6, Retry semantics, `ThreadCap` wins when both limits hit, plain wording for permanent exhaustion, process thread budget), new § B.7 (hook thread), § J (failure modes H1–H11), L3, D.2, F, A; 06 (retry exhaustion, hook thread, worker replacement, thread budget tests); 07 (T3.2.3 scope: hook lifecycle moves from T3.2.4 into it); ADR-025 amendments with the reasoning.

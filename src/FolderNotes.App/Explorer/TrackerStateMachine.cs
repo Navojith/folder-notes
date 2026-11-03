@@ -298,6 +298,11 @@ internal sealed class TrackerStateMachine
                 return StartResult.AlreadyRunning;
         }
 
+        if (_guard.AbandonedThreads >= _limits.MaxAbandonedThreads)
+        {
+            return StartResult.Disabled;                   // the lifetime cap was used up (even via Stop): off for this process
+        }
+
         if (!_guard.TryAcquire(this))
         {
             return StartResult.AnotherTrackerActive;
@@ -318,11 +323,19 @@ internal sealed class TrackerStateMachine
     /// Any state → Stopped (a Disabled tracker stays Disabled and keeps the process slot: the latch is not an
     /// escape hatch, and no second tracker may start in its place), publishes Inactive, and frees the process slot otherwise. The host ends the worker (bounded wait).
     /// </summary>
-    public void Stop()
+    public void Stop(bool workerAbandoned = false)
     {
         if (LiveWorkers == 1)
         {
-            _guard.ReleaseThread(TrackerThreadKind.Worker);
+            // A worker that would not end within the bounded wait is left behind: it still counts against the cap (04 B.6).
+            if (workerAbandoned)
+            {
+                _guard.AbandonThread(TrackerThreadKind.Worker);
+            }
+            else
+            {
+                _guard.ReleaseThread(TrackerThreadKind.Worker);
+            }
         }
 
         LiveWorkers = 0;

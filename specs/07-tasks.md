@@ -291,9 +291,9 @@ smoke tests pass.
   - [x] **T3.2.2 🧱 Pure logic** *(done 2026-11-01: 146 tests, 4 mutation checks; interpretations in 04 § I; open questions Q1, Q2 in 09)* (`TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`,
     `ActiveFolderState`, plus `StatePublisher`, `EvaluationWatchdog`, `ForegroundResolver`, `RootValidator`; the `FakeShellWindowsGateway` moves to T3.2.3 with the interface) and their unit tests (06 § ExplorerTracker tests, *Logic*).
     *Done when:* all logic tests pass with `FakeTimeProvider`, no Win32/COM referenced from these types.
-  - [ ] **T3.2.3 🧱 COM layer and thread hosts** *(scope amended 2026-11-03 for Q1/Q2, REQ-031/NFR-01/NFR-06)*:
+  - [x] **T3.2.3 🧱 COM layer and thread hosts** *(done 2026-11-03; scope amended for Q1/Q2, REQ-031/NFR-01/NFR-06; interpretations in 04 § K)*:
     steps in order: (1) ✅ retry exhaustion and the process thread budget (`TrackerProcessGuard`), (2) ✅ `SignalRouter`
-    and `HookThread` (lifecycle, no COM), (3) ⚪ typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA
+    and `HookThread` (lifecycle, no COM), (3) ✅ typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA
     worker host with message loop and the watchdog thread (cancel → abandon → circuit breaker). *Done when:* the COM,
     stale/disconnected and wedge tests pass; the hook-thread, worker-replacement, retry-exhaustion and thread-budget
     tests of 06 pass; the `dynamic`/`InvokeMember` and hook-thread source guards pass; live-RCW count is 0 after tests.

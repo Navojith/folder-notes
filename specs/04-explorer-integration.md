@@ -471,6 +471,32 @@ Reviewed before implementation. Each has an owner and a test (06 § Hook thread)
 | H10 | Process-wide thread growth (restart loops) | Unbounded threads | Thread budget in B.6: ≤ 3 live, ≤ 7 abandoned over the process lifetime; `Start` is refused when a kind is exhausted |
 | H11 | Hook thread accidentally touches COM or UI (a later change) | Re-introduces the COM-wait re-entrancy or a hang | Source-guard test: `HookThread`/`SignalRouter` reference no `ComRef`, `ComObject`, `Marshal`, gateway types or `IUiDispatcher` |
 
+#### K. Interpretations fixed while building the COM layer and thread hosts (T3.2.3, 2026-11-03)
+
+Code in `src/FolderNotes.App/Explorer/Com/` (interop, `ComRef`, gateway) and `Explorer/Native/` (hosts):
+- **Gateway shape.** `IShellWindowsGateway.TryEnumerateTabs(list)` returns an HRESULT (0, or the root's failure to classify) and appends
+  `DiscoveredTab<TabHandle>`; `TryReadPath(handle)` returns `PathReadResult(Path, Hr)`; a virtual folder is success with a null path.
+  Nothing throws for a COM failure; a stray exception is turned into its HRESULT. `IShellWindowsGatewayFactory.TryCreate` is separate so
+  recovery can retry creation. A tab whose `GetWindow` is 0 is keyed by its frame (the implicit tab of 04 C); a window with no
+  `IShellBrowser` is skipped (nothing to read).
+- **What is kept.** Only the `IShellBrowser` per tab (`ComTabHandle`). The dispatch item, `IShellView` and `IPersistFolder2` live inside one call and
+  are released there. `RcwTracker` counts live wrappers and any release from a thread other than the acquiring one (must be 0).
+  *Not provable by a counter:* that `FinalRelease` actually dropped the last Explorer-side reference; S5/P1 measured that on a proxy, and T3.2.5
+  re-checks it against Explorer.
+- **Worker host.** `StaWorkerHost` is the one STA thread: `CoInitializeEx`, `CoEnableCallCancellation`, its own queue and loop, delegates `onStart`
+  / `onWake` / `onStop` / posted actions all running on it, each bracketed for the watchdog by `Evaluate`, exceptions logged and swallowed.
+  It is the router's wake target. It is started once; a replacement is a new object with the new generation. `MarkAbandoned` makes it ignore everything.
+- **Watchdog thread.** One `ExplorerTracker.Watchdog` thread for the tracker's life, waiting on an event (idle = 0 CPU, tested). It reads the watched
+  worker's `EvaluationWatchdog`: `CoCancelCall(threadId, 0)` at the cancel time, then reports the wedge. It references no hook and no COM object (guard test).
+- **Supervisor.** `WorkerSupervisor` does the order the spec asks for, under one lock: `Detach` and un-watch the old worker, `OnWedge` (generation bump and
+  `Inactive` first), then at most one replacement, started within a bound (1 s), attached, watched. A replacement that does not start counts as another
+  wedge, so the breaker and the cap bound that loop. `Stop`: detach → end the worker (≤ 2 s, else abandon) → stop the watchdog (≤ 1 s); an
+  abandoned-on-Stop worker **counts against the lifetime cap** (`Stop(workerAbandoned)`) but not the breaker (it was not an evaluation wedge).
+- **Start after exhaustion.** `Start` is refused with `Disabled` whenever the process-wide count has reached the cap, even if the tracker object is new
+  or got there through stuck Stops.
+- **Still not built (T3.2.4):** the evaluation itself (what `onWake` does), scoped-hook policy, recovery, publishing, DI. The hook thread is
+  started and stopped by the composition, not by the supervisor, so the supervisor cannot touch a hook (test).
+
 #### I. Interpretations fixed while implementing the pure logic (T3.2.2, 2026-11-01)
 
 The wording above left these open; the code and its tests now fix them (`src/FolderNotes.App/Explorer/`):

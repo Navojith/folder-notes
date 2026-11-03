@@ -358,7 +358,7 @@ public class TrackerStateMachineTests
         m.Start().ShouldBe(StartResult.Disabled);
         m.Retry().ShouldBe(RetryResult.ThreadCapReached);
         m.IsPermanentlyDisabled.ShouldBeTrue();
-        Machine().Start().ShouldBe(StartResult.AnotherTrackerActive);   // a new tracker object cannot take the slot or reset the count
+        Machine().Start().ShouldBe(StartResult.Disabled);   // a new tracker object cannot reset the count: the process is exhausted
         _guard.AbandonedThreads.ShouldBe(6);
     }
 
@@ -390,8 +390,35 @@ public class TrackerStateMachineTests
         a.OnWedge().Reason.ShouldBe(DisabledReason.ThreadCap);
 
         var b = Machine();
-        b.Start().ShouldBe(StartResult.AnotherTrackerActive);
+        b.Start().ShouldBe(StartResult.Disabled);              // the shared count says the process is exhausted
         _guard.AbandonedThreads.ShouldBe(6);
+    }
+
+    [Fact]
+    public void NFR01_Stop_with_an_abandoned_worker_counts_it_against_the_lifetime_cap_but_not_the_breaker()
+    {
+        var m = Started();
+
+        m.Stop(workerAbandoned: true);
+
+        m.State.ShouldBe(TrackerState.Stopped);
+        _guard.AbandonedThreads.ShouldBe(1);
+        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
+        m.WedgesInWindow.ShouldBe(0);                          // a stuck Stop is not an evaluation wedge
+    }
+
+    [Fact]
+    public void NFR01_Start_is_refused_once_stops_alone_used_up_the_lifetime_cap()
+    {
+        var limits = new TrackerLimits { MaxAbandonedThreads = 2 };
+        for (int i = 0; i < 2; i++)
+        {
+            var m = Started(limits);
+            m.Stop(workerAbandoned: true);
+        }
+
+        Machine(limits).Start().ShouldBe(StartResult.Disabled);
+        _guard.AbandonedThreads.ShouldBe(2);
     }
 
     [Fact]

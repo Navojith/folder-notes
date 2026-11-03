@@ -28,6 +28,32 @@ public class ExplorerLogicSourceGuardTests
         ("SQLite / notes", new Regex(@"\b(Sqlite|INoteStore|IFolderIdentityService)\w*")),
     ];
 
+    /// <summary>04 B.7(c): the watchdog calls CoCancelCall with a thread id and reports a wedge; it touches no hook and no COM object.</summary>
+    [Fact]
+    public void NFR01_The_watchdog_thread_touches_neither_hooks_nor_COM_objects()
+    {
+        var text = StripComments(File.ReadAllText(Path.Combine(RepoFiles.AppDir, "Explorer", "Native", "WatchdogThread.cs")));
+        Regex.IsMatch(text, @"(HookThread|IWinEventApi|SetHook|Unhook|ComRef|ComObject|IShellWindows\w*|IShellBrowser|Marshal\.)").ShouldBeFalse();
+    }
+
+    /// <summary>04 B.2: only the COM worker host and the COM folder may create COM objects; nothing outside them references ComRef or the interfaces.</summary>
+    [Fact]
+    public void NFR01_COM_types_are_referenced_only_inside_the_Com_folder_and_the_worker_host()
+    {
+        var dir = Path.Combine(RepoFiles.AppDir, "Explorer");
+        foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(dir, file);
+            if (rel.StartsWith("Com" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var text = StripComments(File.ReadAllText(file));
+            Regex.IsMatch(text, @"(ComRef<|GeneratedComInterface|IShellWindows|IShellBrowser|IWebBrowser2|IFolderView|IPersistFolder2)").ShouldBeFalse($"{rel} must not touch COM types (04 B.2)");
+        }
+    }
+
     [Fact]
     public void NFR01_H11_The_hook_layer_references_no_COM_UI_or_file_system_types()
     {
