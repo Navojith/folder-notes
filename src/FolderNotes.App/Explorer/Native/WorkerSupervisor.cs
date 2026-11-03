@@ -22,6 +22,8 @@ internal sealed class WorkerSupervisor : IDisposable
     private readonly Action<string> _log;
     private readonly TimeSpan _startTimeout;
     private readonly TimeSpan _stopTimeout;
+    private readonly Action? _beforeWorker;
+    private readonly Action? _onStopping;
     private readonly Lock _gate = new();
     private StaWorkerHost? _current;
     private int _replacements;
@@ -34,8 +36,12 @@ internal sealed class WorkerSupervisor : IDisposable
         Func<int, StaWorkerHost> createWorker,
         Action<string>? log = null,
         TimeSpan? startTimeout = null,
-        TimeSpan? stopTimeout = null)
+        TimeSpan? stopTimeout = null,
+        Action? beforeWorker = null,
+        Action? onStopping = null)
     {
+        _beforeWorker = beforeWorker;
+        _onStopping = onStopping;
         _machine = machine ?? throw new ArgumentNullException(nameof(machine));
         _router = router ?? throw new ArgumentNullException(nameof(router));
         _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
@@ -68,8 +74,10 @@ internal sealed class WorkerSupervisor : IDisposable
                 return result;
             }
 
+            SafeRun(_beforeWorker);                        // hooks first (04 B.7): the order is hook thread, watchdog, worker
             if (!_watchdog.IsRunning && !_watchdog.Start())
             {
+                SafeRun(_onStopping);
                 _machine.Stop();
                 return StartResult.AnotherTrackerActive;   // the budget refused a second watchdog
             }
@@ -87,6 +95,7 @@ internal sealed class WorkerSupervisor : IDisposable
             var result = _machine.Retry();
             if (result == RetryResult.Started)
             {
+                SafeRun(_beforeWorker);
                 if (!_watchdog.IsRunning)
                 {
                     _watchdog.Start();
@@ -117,6 +126,7 @@ internal sealed class WorkerSupervisor : IDisposable
             }
         }
 
+        SafeRun(_onStopping);                              // hooks off after the worker is detached, before it ends (04 B.7)
         bool clean = worker?.Stop(_stopTimeout) ?? true;
         lock (_gate)
         {
@@ -128,6 +138,18 @@ internal sealed class WorkerSupervisor : IDisposable
     }
 
     public void Dispose() => Stop();
+
+    private void SafeRun(Action? action)
+    {
+        try
+        {
+            action?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log($"Supervisor callback failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
 
     /// <summary>Called on the watchdog thread when a worker did not return after the cancel (04 B.6).</summary>
     public void OnWorkerWedged(IWatchedWorker watched)

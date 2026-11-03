@@ -297,7 +297,7 @@ smoke tests pass.
     worker host with message loop and the watchdog thread (cancel → abandon → circuit breaker). *Done when:* the COM,
     stale/disconnected and wedge tests pass; the hook-thread, worker-replacement, retry-exhaustion and thread-budget
     tests of 06 pass; the `dynamic`/`InvokeMember` and hook-thread source guards pass; live-RCW count is 0 after tests.
-  - [ ] **T3.2.4 🧱 `ExplorerTracker` composition:** the scope/re-scope policy over the hook thread (hook lifecycle itself is T3.2.3), scheduler wiring, poll safety net,
+  - [x] **T3.2.4 🧱 `ExplorerTracker` composition** *(done 2026-11-03; design in 04 § L)*: the scope/re-scope policy over the hook thread (hook lifecycle itself is T3.2.3), scheduler wiring, poll safety net,
     recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
     `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
     pass; `AppShell`/`App.xaml.cs` do not start it (guard test).

@@ -202,7 +202,7 @@ public class TrackerStateMachineTests
     public void NFR01_Three_wedges_inside_ten_minutes_trip_the_breaker()
     {
         var m = Started(RoomyCap);
-        _pub.TryPublish(_pub.Generation, _pub.NextSequence(), new ActiveFolderState(1, 1, @"C:", 0));
+        _pub.TryPublish(_pub.Generation, _pub.NextSequence(), new ActiveFolderState(1, 1, @"C:\a", 0));
         Wedge(m);
         Minutes(3);
         Wedge(m);

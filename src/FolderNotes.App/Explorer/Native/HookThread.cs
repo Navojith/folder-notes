@@ -74,7 +74,7 @@ internal static class WinEventMap
 /// had to be abandoned is never replaced in this process.
 /// </para>
 /// </summary>
-internal sealed class HookThread : IDisposable
+internal sealed class HookThread : IDisposable, IHookScope
 {
     private const uint WmCommand = MessageLoopNative.WM_APP + 1;
 
@@ -389,6 +389,11 @@ internal sealed class HookThread : IDisposable
         if (s.ForegroundHook == 0)
         {
             return;                                        // not installed (or already removed): nothing to scope
+        }
+
+        if (pid == s.ScopePid && (pid == 0 || s.Scoped.Count > 0))
+        {
+            return;                                        // already listening to exactly this process: a replacement worker asks again, nothing to do
         }
 
         RemoveScoped(s);

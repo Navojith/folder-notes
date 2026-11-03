@@ -441,6 +441,15 @@ O-24 stays open). Elevated Explorer unsupported in v1 (no crash, no retry loop).
   degrade to the poll and none count toward the breaker; the callback no longer filters by window class (moved to the worker).
   The earlier text "the watchdog removes the abandoned worker's hooks" is withdrawn.
 
+**Watchdog reliability (2026-11-03, probe P6, details in 04 § H):** `CoCancelCall` has no documented latency bound. Measured against a hung and a fully
+frozen scratch server and in six other adverse cases it returned in ≤ 1.1 ms; `ulTimeout` delays the cancelled call, not the canceller. Accepted
+as is, with the uncertainty recorded: cancel latency is measured and logged, and a contingency (abandon deadline on a threadpool timer armed before the
+cancel, ≤ 1 abandoned watchdog thread) is specified but not built, pending the user's approval and a measured cancel > 50 ms on real Explorer.
+
+**Composition (T3.2.4, 2026-11-03; 04 § L):** one synchronous `TrackerEngine` per worker (empty cache, its own generation) runs only on the worker and owns no
+thread or timer; `ExplorerTracker` composes it with the machine, publisher, router, hook thread, watchdog and supervisor; recovery and root replacement run on the
+worker under the watchdog; scope requests are idempotent and generation-gated. A suspect root is replaced at most twice in a row (L7 against L8).
+
 **Probe results (T3.2.1, 2026-11-01; details in 04 § H):** D1 holds, hand-written interfaces match the SDK headers and work
 live, with two corrections to this ADR's first draft: release is `ComObject.FinalRelease()` (not
 `Marshal.FinalReleaseComObject`, which throws), and a closed window's objects return `E_FAIL`, so `Gone` also uses

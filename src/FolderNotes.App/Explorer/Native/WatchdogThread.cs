@@ -22,6 +22,11 @@ internal sealed class WatchdogThread : IDisposable
     private volatile bool _stopping;
     private int _slotHeld;
     private int _cancelCalls;
+    private long _maxCancelTicks;
+    private int _slowCancelLogged;
+
+    /// <summary>A cancel slower than this is logged once and is the trigger for the contingency design (04 § H, P6).</summary>
+    public static readonly TimeSpan SlowCancel = TimeSpan.FromMilliseconds(50);
 
     public WatchdogThread(TrackerProcessGuard guard, Action<IWatchedWorker> onWedged, Action<uint>? cancel = null, Action<string>? log = null)
     {
@@ -33,6 +38,9 @@ internal sealed class WatchdogThread : IDisposable
 
     /// <summary>How many times <c>CoCancelCall</c> was issued (diagnostics and tests).</summary>
     public int CancelCalls => Volatile.Read(ref _cancelCalls);
+
+    /// <summary>Longest <c>CoCancelCall</c> so far, in milliseconds (reported in <c>TrackerStats</c>; 04 § H, P6).</summary>
+    public double MaxCancelCallMs => TimeSpan.FromTicks(Interlocked.Read(ref _maxCancelTicks)).TotalMilliseconds;
 
     public bool IsRunning => _thread is not null && !_exited.IsSet;
 
@@ -183,7 +191,25 @@ internal sealed class WatchdogThread : IDisposable
         {
             if (threadId != 0)
             {
-                _cancel(threadId);
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                try
+                {
+                    _cancel(threadId);
+                }
+                finally
+                {
+                    var took = System.Diagnostics.Stopwatch.GetElapsedTime(start);
+                    long ticks = took.Ticks;
+                    long seen;
+                    while (ticks > (seen = Interlocked.Read(ref _maxCancelTicks)) && Interlocked.CompareExchange(ref _maxCancelTicks, ticks, seen) != seen)
+                    {
+                    }
+
+                    if (took > SlowCancel && Interlocked.Exchange(ref _slowCancelLogged, 1) == 0)
+                    {
+                        _log($"CoCancelCall took {took.TotalMilliseconds:F0} ms (expected about 1 ms): see 04 H, P6.");
+                    }
+                }
             }
         }
         catch (Exception ex)

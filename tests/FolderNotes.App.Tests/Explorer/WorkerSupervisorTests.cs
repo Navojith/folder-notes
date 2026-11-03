@@ -27,6 +27,7 @@ public sealed class WorkerSupervisorTests : IDisposable
     private int _blockNextWakes;                              // how many wake-ups will hang
     private int _failNextStarts;                              // how many workers hang in onStart
     private int _throwNextWakes;
+    private int _cancelDelayMs;                               // makes CoCancelCall "slow" to exercise the instrumentation
     private readonly List<(int Generation, int Thread, ApartmentState Apartment)> _starts = [];
     private readonly List<(int Generation, int Thread)> _stops = [];
 
@@ -39,7 +40,7 @@ public sealed class WorkerSupervisorTests : IDisposable
 
     private void Build(TimeSpan startTimeout, TimeSpan stopTimeout)
     {
-        _watchdog = new WatchdogThread(_guard, w => _supervisor.OnWorkerWedged(w), tid => { lock (_lock) { _cancelled.Add(tid); } }, m => _log.Add(m));
+        _watchdog = new WatchdogThread(_guard, w => _supervisor.OnWorkerWedged(w), tid => { if (_cancelDelayMs > 0) { Thread.Sleep(_cancelDelayMs); } lock (_lock) { _cancelled.Add(tid); } }, m => _log.Add(m));
         _supervisor = new WorkerSupervisor(_machine, _router, _publisher, _watchdog, CreateWorker, m => _log.Add(m), startTimeout, stopTimeout);
     }
 
@@ -240,6 +241,33 @@ public sealed class WorkerSupervisorTests : IDisposable
         _guard.AbandonedThreads.ShouldBe(2);
     }
 
+    [Fact]
+    public void NFR01_P6_The_watchdog_measures_every_cancel_and_logs_a_slow_one_once()
+    {
+        _supervisor.Start();
+        _cancelDelayMs = 80;                                   // a cancel far slower than the ~1 ms measured (04 H, P6)
+
+        _blockNextWakes = 1;
+        _router.Raise(TrackerSignal.NameChange);
+        WaitFor(() => _supervisor.Replacements == 1, "replacement even though the cancel itself was slow");
+
+        _watchdog.MaxCancelCallMs.ShouldBeGreaterThanOrEqualTo(70);
+        _log.Count(m => m.Contains("CoCancelCall took", StringComparison.Ordinal)).ShouldBe(1);
+    }
+
+    [Fact]
+    public void NFR01_P6_A_fast_cancel_is_not_reported()
+    {
+        _supervisor.Start();
+
+        _blockNextWakes = 1;
+        _router.Raise(TrackerSignal.NameChange);
+        WaitFor(() => _supervisor.Replacements == 1, "replacement");
+
+        _watchdog.MaxCancelCallMs.ShouldBeLessThan(50);
+        _log.ShouldNotContain(m => m.Contains("CoCancelCall took", StringComparison.Ordinal));
+    }
+
     // ---- breaker, Retry, cap -----------------------------------------------------------------------
 
     private void WedgeOnce()
@@ -254,7 +282,7 @@ public sealed class WorkerSupervisorTests : IDisposable
     public void NFR01_Three_wedges_trip_the_breaker_leave_no_worker_and_one_Retry_works()
     {
         _supervisor.Start();
-        _publisher.TryPublish(_publisher.Generation, _publisher.NextSequence(), new ActiveFolderState(1, 1, @"C:", 0));
+        _publisher.TryPublish(_publisher.Generation, _publisher.NextSequence(), new ActiveFolderState(1, 1, @"C:\a", 0));
         WedgeOnce();
         WedgeOnce();
         WedgeOnce();

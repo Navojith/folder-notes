@@ -28,6 +28,23 @@ public class ExplorerLogicSourceGuardTests
         ("SQLite / notes", new Regex(@"\b(Sqlite|INoteStore|IFolderIdentityService)\w*")),
     ];
 
+    /// <summary>04 B.6 (3), B.7: every engine gets the generation-gated scope channel, never the raw hook thread (a zombie must not re-scope hooks).</summary>
+    [Fact]
+    public void NFR01_Engines_are_given_a_generation_gated_hook_scope()
+    {
+        var text = StripComments(File.ReadAllText(Path.Combine(RepoFiles.AppDir, "Explorer", "ExplorerTracker.cs")));
+        Regex.IsMatch(text, @"new TrackerEngine\([^;]*new GenerationScope\(generation,").ShouldBeTrue();
+        Regex.IsMatch(text, @"new TrackerEngine\([^;]*,\s*_hooks\s*,").ShouldBeFalse();
+    }
+
+    /// <summary>04 L: the engine runs on the worker the host gives it; it creates no thread, task, timer or Win32/COM call of its own.</summary>
+    [Fact]
+    public void NFR01_The_engine_owns_no_thread_timer_or_interop()
+    {
+        var text = StripComments(File.ReadAllText(Path.Combine(RepoFiles.AppDir, "Explorer", "TrackerEngine.cs")));
+        Regex.IsMatch(text, @"(new Thread|Task\.Run|ThreadPool|new Timer|new System\.Threading\.Timer|LibraryImport|DllImport|Marshal\.|GeneratedComInterface|ComRef<)").ShouldBeFalse();
+    }
+
     /// <summary>04 B.7(c): the watchdog calls CoCancelCall with a thread id and reports a wedge; it touches no hook and no COM object.</summary>
     [Fact]
     public void NFR01_The_watchdog_thread_touches_neither_hooks_nor_COM_objects()

@@ -10,6 +10,7 @@ static class Program
             case "p3": return P3.Run();
             case "p2": return P2.Run();
             case "p5": return P5.Run();
+            case "p6": return P6.Run();
             case "churn": return P5.Churn(int.Parse(args[1]));
             case "p2server": return P2.Server();
             default: Console.WriteLine("usage: S5Probes p1 | p2 | p3 | p5"); return 2;

@@ -110,6 +110,22 @@ an unchanged state; an elevated/denied frame is not retried until it navigates o
 - *Real Win32 smoke (not Explorer):* a real hook thread installs a scoped hook, receives a `NotifyWinEvent` raised by
   the test, wakes a consumer, uninstalls, and the thread exits; thread count returns to baseline.
 
+**Composition (T3.2.4; `TrackerEngineTests`, `ExplorerTrackerTests`):** the engine on a fake Explorer and a fake clock, with no threads: first
+evaluation, navigation within 150 ms, rapid navigation bounded (about one evaluation per 30 ms, final state published, sequences increasing), tab switch,
+new tab = one rebuild, implicit-frame tab, virtual folder = null path, owned window keeps the folder, minimize/other app = Inactive, nothing scheduled
+while another app is foreground, hook scope follows the foreground process and is never requested twice, transient failures retried without flicker,
+three `Other` failures drop the entry, an exception in the gateway is survived, at most 8 evaluations per wake-up, an unreadable (elevated) frame is
+not retried in a loop but a signal retries it once (L8), a dead root publishes Inactive first and recovers by itself with no `ShellWindows` creation
+while the shell is down, a changed shell process and `NotifyShellRestarted` are detected, root creation retried on the back-off without limit, a
+private empty root replaced (at most twice, L7 against L8), no handle or root leaks (churn of 50 tabs), and an abandoned generation can neither publish
+nor re-scope. With real threads and the fake desktop: nothing is created by constructing the tracker; the first folder reaches the UI thread; a WinEvent
+through the real hook thread publishes the new folder; delivery is latest-wins (one queued task however many states); `Stop` is bounded and frees
+every thread, hook and handle and a restart works; a second tracker is refused without starting a hook thread; a wedged worker is replaced **without
+a single hook install or uninstall** and its late result is dropped (the stuck read returns a path only it can produce); breaker, one Retry, then
+permanent exhaustion at 6 with Retry refused; `Stop` bounded while wedged; stats; DI resolves one singleton that is not started; cancel latency is
+measured and a slow one logged once. Note: these use real threads with scaled-down limits and generous waits, and passed repeated full runs; the
+interleavings that matter (router race, generation gate) have deterministic tests of their own.
+
 **Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, a new thread
 serves the next signal, the old thread's late result is discarded (generation), the UI thread is never blocked,
 `Stop` returns in ≤ 2 s even while wedged.

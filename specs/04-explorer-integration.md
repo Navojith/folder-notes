@@ -361,7 +361,7 @@ Not every Explorer event can be observed reliably. Each limit and what the desig
 | L1 | WinEvents are asynchronous, unordered relative to COM state, can be coalesced or dropped under load, and `NAMECHANGE` does not guarantee the *path* changed. | Every event only means "re-read"; truth is read from the shell; the poll and the 30 s reconciliation stay. |
 | L2 | There is **no documented event for "active tab changed"** or "navigation committed". S1 saw `NAMECHANGE` / `SHOW` / `HIDE` fire for them on build 22631; that is observed behaviour, not a contract, and may differ on 24H2 and later builds, and on Windows 10. | Poll fallback stays; the T3.5 matrix runs on 3 builds; without the tab class the logic degrades to one implicit tab. |
 | L3 | Out-of-context hooks need a message loop. **Measured (S5/P2):** while a hook-owning STA thread waits inside an outgoing COM call, COM's wait loop still dispatches WinEvent callbacks to it (7 during one 257 ms call), but not posted thread messages. | Hooks live on a separate COM-free hook thread (§B.7, Q2), so no callback runs inside a COM wait; callbacks only set a bit and post one message (§B.4); time-boxed calls (§B.6). |
-| L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. | Cancel, then abandon the thread; circuit breaker. |
+| L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. Its own latency is undocumented; measured ≤ 1.1 ms in every case tried (§ H, P6). | Cancel, then abandon the thread; circuit breaker; cancel latency is measured and logged; contingency design in § H P6. |
 | L5 | `IShellWindows` registers a window after its HWND exists and removes it around the HWND's destruction. | Retry ladder; `IsWindow` and `Gone` checks; reconciliation. |
 | L6 | `TaskbarCreated` is broadcast only to top-level windows, only when a taskbar is created, and not when the shell restarts without one. | Forwarded from the tray window **and** detected independently (`Gone`, shell process change). |
 | L7 | `CLSID_ShellWindows` can be served by a private, empty `rundll32.exe` server (§F). | Gate on the shell window; validate the enumeration. |
@@ -446,6 +446,30 @@ load). **The CPU cost could not be resolved**: the process's CPU clock ticks at 
 is noise at this rate. What is proven is that scoping removes the callbacks entirely; the idle-CPU budget is
 verified end to end in T3.2.5 and T3.5.
 
+**P6: can `CoCancelCall` itself block the watchdog thread? (T3.2.4 pre-work, 2026-11-03).** *Documentation* (Microsoft Learn, `CoCancelCall`,
+`ICancelMethodCalls::Cancel`): `CoCancelCall` finds the thread's cancel object and calls `Cancel(ulTimeout)`; `ulTimeout` is "the number of seconds
+[it] waits for the server to complete the outbound call after the client requests cancellation"; "a return value of S_OK does not mean that the call
+was canceled, only that an attempt was made". **Nothing documented bounds the latency of the request itself, and nothing says it cannot block.**
+*Measured* (scratch server, Release, this machine; the "frozen" cases suspend the scratch server process with `NtSuspendProcess`, never Explorer):
+| Case | `CoCancelCall(tid, 0)` returned | Result |
+|---|---|---|
+| target idle / nonexistent thread id / thread already exited / target in a non-COM wait | 0.00-0.05 ms | `0x8001011E` (cancel not possible), no side effect |
+| target in a call to a hung server | 1.09 ms | `S_OK`; the call returned `RPC_E_CALL_CANCELED` 1.6 ms later |
+| target in a call to a **frozen server process** (no thread can answer) | 0.05 ms | `S_OK`; call returned 0.4 ms later |
+| same, `ulTimeout` = 3 s | 0 ms | `S_OK` at once; the **cancelled call** returned 3002 ms later: the timeout delays the client call, it does not block the canceller |
+| 150 cancels at random moments in a call | mean 0.03, max 0.17 ms | none over 50 ms |
+| 3 threads cancelling the same target at once | 0.02-0.04 ms each | no deadlock |
+| caller COM-initialised (MTA) vs not | 0.00 vs 0.05 ms | same |
+*Conclusion:* in every adverse case tried the request is client-side and returns in about a millisecond; the watchdog uses `ulTimeout = 0`.
+*Not established:* (1) it was never run against Explorer's own proxy while Explorer is genuinely hung (we will not hang it, D4/D5); (2) the
+cancel path inside `combase` is undocumented, so a future Windows build could behave differently; (3) a thread-suspended or debugger-stopped
+*caller* is not a case (it is our own thread). **Residual risk:** if `CoCancelCall` ever did block, the watchdog thread would stop and a wedged
+worker would not be replaced (the UI stays responsive; the panel would show no folder). **Mitigation now:** the watchdog times every cancel
+(`MaxCancelCallMs`, in `TrackerStats`) and logs once if one exceeds 50 ms, so T3.2.5 and later field logs show it. **Contingency design (not built;
+needs the user's approval because it changes the thread budget):** arm a threadpool timer for the abandon deadline *before* issuing the cancel, so
+abandonment never depends on the cancel returning; if the watchdog is found stuck, abandon it too and start one new watchdog (budget: ≤ 1 abandoned
+watchdog thread, owned-at-once 10 → 11). Trigger: any measured cancel > 50 ms on a real Explorer in T3.2.5.
+
 **P4** (shell down, `rundll32` private server) is not run: it needs Explorer killed (D5). It stays open as O-24.
 
 #### J. Failure modes introduced by the separate hook thread (Q2, 2026-11-03)
@@ -470,6 +494,48 @@ Reviewed before implementation. Each has an owner and a test (06 § Hook thread)
 | H9 | A callback runs while the hook thread is applying a command | Torn hook state | Same thread: callbacks and commands never overlap |
 | H10 | Process-wide thread growth (restart loops) | Unbounded threads | Thread budget in B.6: ≤ 3 live, ≤ 7 abandoned over the process lifetime; `Start` is refused when a kind is exhausted |
 | H11 | Hook thread accidentally touches COM or UI (a later change) | Re-introduces the COM-wait re-entrancy or a hang | Source-guard test: `HookThread`/`SignalRouter` reference no `ComRef`, `ComObject`, `Marshal`, gateway types or `IUiDispatcher` |
+
+#### L. Composition (T3.2.4, 2026-11-03)
+
+Written before the code. COM ownership stays on the worker; nothing here is started by `AppShell` (a guard test) and DI only *defines* the registration.
+- **Parts.** `IWin32Shell` (non-COM window queries: foreground, frame class, owner, minimized, shell window and its process, `IsWindow`, tab children in
+  z-order, "any Explorer frame exists"; real `Win32Shell`, fake in tests). `TrackerEngine` (runs only on the worker thread: gateway, `TabMap`,
+  `EvaluationScheduler`, `RootValidator`, recovery; **synchronous and driven by a `TimeProvider`, so it is tested with fakes and a fake clock, no threads**).
+  `ExplorerTracker` (the public face and the owner of the machine, publisher, router, hook thread, watchdog, supervisor and counters).
+- **Signals.** Router bits map to scheduler kinds: `Foreground`→Foreground; `NameChange`/`ShowHide`/`Minimize`→Navigation; `CreateDestroy`→Structure. The
+  callback no longer filters by window class (§ B.7), and the engine does not either: an event from the scoped process that changes nothing costs one
+  evaluation that publishes nothing (throttled to ≤ 33/s, < 10 ms). `Structure` first sweeps entries whose window is gone (`IsWindow`).
+- **Evaluation** (the `TrackerRig` of T3.2.2, made real): (1) shell check: `GetShellWindow()` is 0 or its process changed ⇒ recovery. (2) foreground
+  → frame by `ForegroundResolver` (a window owned by a frame keeps it, minimized = none); none ⇒ scope 0 and publish Inactive. (3) re-scope the hooks to
+  the frame's process if it differs from the last request. (4) a frame marked unresolved is not re-read by Poll/Reconcile/Retry/Confirm (L8); it is
+  retried by a Foreground or Structure signal or a navigation-signal read. (5) active tab = `ActiveTabResolver`; none visible ⇒ `Unresolved`. (6) miss or
+  `Rebuild` ⇒ enumerate once, classify the root's HRESULT (`Gone` ⇒ recovery), validate with `RootValidator`, `Reconcile`. (7) one `TryReadPath` on the
+  cached entry; failures are classified (`windowAlive` from `IsWindow`), recorded in the map, and publish nothing new; success publishes through the
+  `StatePublisher` with the worker's generation and the evaluation's sequence. The `LadderExhausted` advice marks the frame unresolved.
+- **L7 against L8 (found by the engine tests).** "Frames exist but the root enumerates none" also describes a desktop whose only Explorer windows
+  are elevated and invisible to our root. Replacing the root forever would be exactly the retry loop L8 forbids. So a suspect root is replaced **at most
+  twice in a row**; after that an empty enumeration is accepted as real (the frames become `unresolved`, L8). Any non-empty enumeration resets the count.
+- **Scope requests are idempotent and generation-gated** (found by the tracker tests): a replacement worker's fresh engine asks for the scope the hook thread
+  already has, so the hook thread ignores a request for the pid it is already listening to (no uninstall/reinstall of four hooks); and each engine's channel
+  (`GenerationScope`) forwards only while its generation is current, so a zombie can never re-scope the hooks.
+- **Hook-scope policy.** Desired scope = process of the foreground Explorer frame, 0 when none. The engine asks `IHookScope.SetScope` only when it
+  changes. (`HookThread` implements `IHookScope`; the engine never touches a hook handle.)
+- **Recovery.** `ShellGone` (root `Gone`, `NotifyShellRestarted`, shell process change, shell window 0, or `RootValidator` says `ReplaceRoot`): machine
+  → `Recovering` (publishes Inactive), map cleared and gateway disposed **on the worker**, then attempts at the machine's back-off (250, 500, 1000,
+  2000 ms, then every 5 s, unbounded) **only while `GetShellWindow() != 0`**; a created root is validated (`Suspect` retries on the next back-off step;
+  `ReplaceRoot` discards it); success ⇒ `RecoverySucceeded`, rebuild, evaluate. No user action. Recovery runs on the worker, so a hung attempt is
+  covered by the watchdog like any other call.
+- **Timers.** The engine returns "next due"; the worker arms one `System.Threading.Timer` (a pool timer, not one of our threads) whose callback only posts
+  a wake-up to the worker; an abandoned worker's wake-ups are refused. Zero delay re-posts instead of looping, so the message loop is never starved
+  (at most 8 evaluations per wake-up).
+- **Publishing.** The sink keeps a single latest-wins slot and posts at most one task to `IUiDispatcher`; the event is raised on the UI thread with the
+  newest state; a queue shutting down drops it silently. `Current` is the publisher's current state.
+- **Start/Stop order** (supervisor callbacks): `Start` = machine → hook thread → watchdog → worker. `Stop` = detach worker → hooks off (≤ 1 s) → worker
+  (≤ 2 s) → watchdog (≤ 1 s) → Inactive. `Retry` re-runs the start sequence (a hook thread that ended cleanly may be re-created once).
+- **Thread safety of the state machine.** Called from the UI, worker and watchdog threads, so its mutating methods are synchronized (§ B.6 unchanged).
+- **Stats.** `TrackerStats`: evaluations, rebuilds, recoveries, published states, evaluation p50/p95/max ms (last 256), wedges (abandoned workers),
+  replacements, live RCWs, cross-thread releases, hooks active, cancel calls and `MaxCancelCallMs`, state and disabled reason, tab entries.
+- **DI.** `AddExplorerTracker(IServiceCollection)` registers `IExplorerTracker` as a singleton that is *not started*; `App.xaml.cs` does not call it until T3.4.
 
 #### K. Interpretations fixed while building the COM layer and thread hosts (T3.2.3, 2026-11-03)
 

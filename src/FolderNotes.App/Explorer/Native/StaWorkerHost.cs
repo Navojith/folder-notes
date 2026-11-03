@@ -67,6 +67,9 @@ internal sealed class StaWorkerHost : IWakeTarget, IWatchedWorker
 
     public EvaluationWatchdog Watchdog { get; }
 
+    /// <summary>The worker's own state (its engine and timer), set and read on the worker thread or by the owner that created it.</summary>
+    public object? State { get; set; }
+
     public uint ThreadId => Volatile.Read(ref _threadId);
 
     /// <summary>Managed thread id of the worker; every delegate runs on it (tests assert it).</summary>

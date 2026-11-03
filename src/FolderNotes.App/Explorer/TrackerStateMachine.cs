@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace FolderNotes.App.Explorer;
 
 internal enum TrackerState
@@ -249,6 +251,9 @@ internal sealed class TrackerProcessGuard
 /// </summary>
 internal sealed class TrackerStateMachine
 {
+    // Thread safety: the worker thread (recovery), the watchdog thread (OnWedge) and the UI thread (Start/Stop/Retry) all call
+    // this. Every mutating method is [Synchronized] (locks this; the machine is never exposed outside the tracker), and the
+    // state properties are single enum/int reads, atomic on x64. It calls StatePublisher (its own lock) but is never called back by it.
     private static readonly TimeSpan[] RecoveryDelays =
         [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)];
 
@@ -282,12 +287,16 @@ internal sealed class TrackerStateMachine
     {
         get
         {
-            Expire();
-            return _wedges.Count;
+            lock (this)
+            {
+                Expire();
+                return _wedges.Count;
+            }
         }
     }
 
     /// <summary>Stopped → Running. The host then starts the one worker.</summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public StartResult Start()
     {
         switch (State)
@@ -323,6 +332,7 @@ internal sealed class TrackerStateMachine
     /// Any state → Stopped (a Disabled tracker stays Disabled and keeps the process slot: the latch is not an
     /// escape hatch, and no second tracker may start in its place), publishes Inactive, and frees the process slot otherwise. The host ends the worker (bounded wait).
     /// </summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public void Stop(bool workerAbandoned = false)
     {
         if (LiveWorkers == 1)
@@ -351,6 +361,7 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>The root object reported Gone, <c>TaskbarCreated</c> arrived, or the shell process changed (04 F).</summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public void ShellGone()
     {
         if (State != TrackerState.Running)
@@ -364,6 +375,7 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>Delay before the next attempt to recreate <c>IShellWindows</c>: 250 ms, 500 ms, 1 s, 2 s, then every 5 s, unbounded.</summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public TimeSpan NextRecoveryDelay()
     {
         var d = _recoveryAttempt < RecoveryDelays.Length ? RecoveryDelays[_recoveryAttempt] : RecoverySteady;
@@ -371,6 +383,7 @@ internal sealed class TrackerStateMachine
         return d;
     }
 
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public void RecoverySucceeded()
     {
         if (State == TrackerState.Recovering)
@@ -384,6 +397,7 @@ internal sealed class TrackerStateMachine
     /// The watchdog abandoned the worker. Invalidates the generation first (publishing Inactive), counts the
     /// abandoned thread, then either allows exactly one replacement or disables the tracker.
     /// </summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public WedgeDecision OnWedge()
     {
         if (State is not (TrackerState.Running or TrackerState.Recovering) || LiveWorkers != 1)
@@ -422,6 +436,7 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>The host started the replacement worker. Refused if one is already live (thread limit).</summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public void ReplacementStarted()
     {
         if (State is not (TrackerState.Running or TrackerState.Recovering))
@@ -443,6 +458,7 @@ internal sealed class TrackerStateMachine
     }
 
     /// <summary>The user's explicit Retry (Settings, T3.4): the only way out of Disabled, and only below the thread cap.</summary>
+    [MethodImpl(MethodImplOptions.Synchronized)]
     public RetryResult Retry()
     {
         if (State != TrackerState.Disabled)

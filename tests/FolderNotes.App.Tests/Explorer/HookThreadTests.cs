@@ -111,6 +111,28 @@ public class HookThreadTests
     }
 
     [Fact]
+    public void NFR01_Asking_for_the_scope_that_is_already_applied_changes_nothing()
+    {
+        using var h = Host();
+        h.Start();
+        h.SetScope(4321);
+        WaitFor(() => h.InstalledHookCount == 5, "scope 4321");
+        int installs = _api.Installs;
+        int unhooks = _api.Unhooks;
+
+        h.SetScope(4321);                                     // a replacement worker asks again
+        h.SetScope(4321);
+        h.SetScope(0);
+        WaitFor(() => h.ScopePid == 0, "scope removed");
+        h.SetScope(0);                                        // removing nothing is also a no-op
+        h.SetScope(4321);
+        WaitFor(() => h.ScopePid == 4321 && h.InstalledHookCount == 5, "scope back");
+
+        _api.Installs.ShouldBe(installs + 4);                 // only the one real change (0 -> 4321) installed anything
+        _api.Unhooks.ShouldBe(unhooks + 4);
+    }
+
+    [Fact]
     public void NFR01_Scoped_hooks_listen_to_the_requested_process_only_and_SetScope_zero_removes_them()
     {
         using var h = Host();
