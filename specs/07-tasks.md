@@ -291,10 +291,13 @@ smoke tests pass.
   - [x] **T3.2.2 🧱 Pure logic** *(done 2026-11-01: 146 tests, 4 mutation checks; interpretations in 04 § I; open questions Q1, Q2 in 09)* (`TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine`,
     `ActiveFolderState`, plus `StatePublisher`, `EvaluationWatchdog`, `ForegroundResolver`, `RootValidator`; the `FakeShellWindowsGateway` moves to T3.2.3 with the interface) and their unit tests (06 § ExplorerTracker tests, *Logic*).
     *Done when:* all logic tests pass with `FakeTimeProvider`, no Win32/COM referenced from these types.
-  - [ ] **T3.2.3 🧱 COM layer:** typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA host with
-    message loop, watchdog (cancel → abandon → circuit breaker). *Done when:* the COM, stale/disconnected and
-    wedge tests pass; the `dynamic`/`InvokeMember` source guard passes; live-RCW count is 0 after tests.
-  - [ ] **T3.2.4 🧱 `ExplorerTracker` composition:** scoped WinEvent hooks, scheduler wiring, poll safety net,
+  - [ ] **T3.2.3 🧱 COM layer and thread hosts** *(scope amended 2026-11-03 for Q1/Q2, REQ-031/NFR-01/NFR-06)*:
+    steps in order: (1) ✅ retry exhaustion and the process thread budget (`TrackerProcessGuard`), (2) ✅ `SignalRouter`
+    and `HookThread` (lifecycle, no COM), (3) ⚪ typed interfaces, `ComRef<T>`, `ComShellWindowsGateway`, the STA
+    worker host with message loop and the watchdog thread (cancel → abandon → circuit breaker). *Done when:* the COM,
+    stale/disconnected and wedge tests pass; the hook-thread, worker-replacement, retry-exhaustion and thread-budget
+    tests of 06 pass; the `dynamic`/`InvokeMember` and hook-thread source guards pass; live-RCW count is 0 after tests.
+  - [ ] **T3.2.4 🧱 `ExplorerTracker` composition:** the scope/re-scope policy over the hook thread (hook lifecycle itself is T3.2.3), scheduler wiring, poll safety net,
     recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
     `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
     pass; `AppShell`/`App.xaml.cs` do not start it (guard test).

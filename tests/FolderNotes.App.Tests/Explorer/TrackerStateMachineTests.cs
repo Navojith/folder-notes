@@ -141,7 +141,7 @@ public class TrackerStateMachineTests
     }
 
     [Fact]
-    public void NFR01_Repeated_failures_cannot_create_unlimited_threads_the_defaults_stop_at_three()
+    public void NFR01_Repeated_failures_cannot_create_unlimited_threads_the_defaults_stop_at_six()
     {
         var m = Started();
         int replacements = 0;
@@ -163,8 +163,9 @@ public class TrackerStateMachineTests
             Minutes(30);                                       // spaced out so the breaker window cannot be what stops it
         }
 
-        replacements.ShouldBe(2);
-        _guard.AbandonedThreads.ShouldBe(3);                   // the cap holds: never more than 3 leaked threads
+        replacements.ShouldBe(5);
+        _guard.AbandonedThreads.ShouldBe(6);                   // the cap holds: never more than 6 leaked threads
+        _guard.LiveThreads(TrackerThreadKind.Worker).ShouldBe(0);
         m.State.ShouldBe(TrackerState.Disabled);
         m.DisabledReason.ShouldBe(DisabledReason.ThreadCap);
         m.LiveWorkers.ShouldBe(0);
@@ -301,18 +302,96 @@ public class TrackerStateMachineTests
         _guard.AbandonedThreads.ShouldBe(6);
     }
 
-    /// <summary>
-    /// Documents specification question Q1 (09): with the shipped limits (breaker at 3 wedges, cap of 3 abandoned
-    /// threads) a breaker trip uses up the entire cap, so the user's Retry can never succeed in that process.
-    /// </summary>
+    // ---- Q1 (04 B.6): breaker 3 wedges / 10 min, lifetime cap 6, defaults ---------------------------------
+
     [Fact]
-    public void NFR01_With_the_default_limits_Retry_after_a_trip_is_refused_see_question_Q1()
+    public void NFR01_Q1_The_shipped_defaults_are_breaker_3_in_10_minutes_and_a_lifetime_cap_of_6()
+    {
+        TrackerLimits.Default.BreakerWedges.ShouldBe(3);
+        TrackerLimits.Default.BreakerWindow.ShouldBe(TimeSpan.FromMinutes(10));
+        TrackerLimits.Default.MaxAbandonedThreads.ShouldBe(6);
+    }
+
+    [Fact]
+    public void NFR01_Q1_With_the_defaults_the_first_breaker_trip_accepts_one_Retry()
     {
         var m = Started();
         Wedge(m); Wedge(m);
-        m.OnWedge().Outcome.ShouldBe(WedgeOutcome.Disabled);
+        var d = m.OnWedge();
 
+        d.Reason.ShouldBe(DisabledReason.CircuitBreaker);      // 3 abandoned: retryable, not permanent
+        m.IsPermanentlyDisabled.ShouldBeFalse();
+        m.CanRetry.ShouldBeTrue();
+        m.Retry().ShouldBe(RetryResult.Started);
+        _guard.AbandonedThreads.ShouldBe(3);                   // Retry never resets the lifetime counter
+    }
+
+    [Fact]
+    public void NFR01_Q1_Second_trip_exhausts_the_cap_and_the_permanent_reason_wins()
+    {
+        var m = Started();
+        Wedge(m); Wedge(m); m.OnWedge();                       // episode 1: 3 abandoned
+        m.Retry().ShouldBe(RetryResult.Started);
+        Wedge(m); Wedge(m);                                    // 5 abandoned
+        var d = m.OnWedge();                                   // 6th: breaker AND cap at the same time
+
+        d.Outcome.ShouldBe(WedgeOutcome.Disabled);
+        d.Reason.ShouldBe(DisabledReason.ThreadCap);
+        m.DisabledReason.ShouldBe(DisabledReason.ThreadCap);
+        m.IsPermanentlyDisabled.ShouldBeTrue();
+        m.CanRetry.ShouldBeFalse();
         m.Retry().ShouldBe(RetryResult.ThreadCapReached);
+        _guard.AbandonedThreads.ShouldBe(6);
+    }
+
+    [Fact]
+    public void NFR01_Q1_Permanent_exhaustion_is_never_lifted_by_waiting_restarting_or_stopping()
+    {
+        var m = Started();
+        Wedge(m); Wedge(m); m.OnWedge();
+        m.Retry();
+        Wedge(m); Wedge(m); m.OnWedge();
+
+        Minutes(24 * 60);                                      // a day later
+        m.Retry().ShouldBe(RetryResult.ThreadCapReached);
+        m.Stop();
+        m.Start().ShouldBe(StartResult.Disabled);
+        m.Retry().ShouldBe(RetryResult.ThreadCapReached);
+        m.IsPermanentlyDisabled.ShouldBeTrue();
+        Machine().Start().ShouldBe(StartResult.AnotherTrackerActive);   // a new tracker object cannot take the slot or reset the count
+        _guard.AbandonedThreads.ShouldBe(6);
+    }
+
+    [Fact]
+    public void NFR01_Q1_The_cap_can_be_reached_without_ever_tripping_the_breaker_and_is_still_permanent()
+    {
+        var m = Started();
+        for (int i = 0; i < 5; i++)
+        {
+            Wedge(m);
+            Minutes(11);                                       // each wedge expires before the next: breaker never trips
+        }
+
+        var d = m.OnWedge();
+
+        d.Reason.ShouldBe(DisabledReason.ThreadCap);
+        m.IsPermanentlyDisabled.ShouldBeTrue();
+        m.WedgesInWindow.ShouldBe(1);
+    }
+
+    [Fact]
+    public void NFR01_Q1_The_exhaustion_count_is_shared_by_every_tracker_instance_of_the_process()
+    {
+        var a = Started();
+        Wedge(a); Wedge(a); a.OnWedge();                       // 3 abandoned by tracker A, breaker
+        a.Stop();                                              // stays Disabled and keeps the slot
+        a.Retry().ShouldBe(RetryResult.Started);
+        Wedge(a); Wedge(a);
+        a.OnWedge().Reason.ShouldBe(DisabledReason.ThreadCap);
+
+        var b = Machine();
+        b.Start().ShouldBe(StartResult.AnotherTrackerActive);
+        _guard.AbandonedThreads.ShouldBe(6);
     }
 
     [Fact]

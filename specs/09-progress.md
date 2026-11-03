@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-01 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.3 COM layer, **after the user answers Q1 and Q2** (T3.2.2 done; T2.9 partial, see O-22)
+**Last updated:** 2026-11-03 · **Current phase:** Phase 2 (App shell) · **Current task:** T3.2.3 COM layer and thread hosts, in progress (Q1/Q2 answered and specified; T3.2.2 done; T2.9 partial, see O-22)
 
 ---
 
@@ -47,6 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⛔ blocked · ⚪ not started
 | T2.8 Settings page | ✅ | 2026-11-01 | `e2ce199` | ADR-022 (settings in the DB; Run entry is the truth, installer defaults it on); live UIA check with real key presses + `perf-check` |
 | T2.9 Accessibility pass | 🟡 partial | 2026-11-01 | `f3aeffa` | Static UIA-name test added (324 App tests green); Accessibility Insights, screen reader and HC passes still manual (O-14) |
 
+| T3.2.3 COM layer and thread hosts | 🟡 partial | 2026-11-03 | not committed | Steps 1-2 done: Q1 (cap 6, `ThreadCap` permanent, process-wide budget) and Q2 (`SignalRouter`, `HookThread`); App 480 → 537. Step 3 (typed COM, `ComRef`, gateway, worker host, watchdog thread) not started |
 | T3.2.2 Tracker pure logic | ✅ | 2026-11-01 | this commit | `TabMap`, `EvaluationScheduler`, `ComFailureClassifier`, `TrackerStateMachine` (+ publisher, watchdog, resolvers, root validator); 146 new tests, App 334 → 480, Core 396; no COM/Win32 (guard test); 4 mutation checks caught. Spec 04 § I records the interpretations; Q1/Q2 open |
 | T3.2.1 Tracker probes (S5) | ✅ | 2026-11-01 | this commit | P1 interop validated vs SDK headers, P2 `CoCancelCall` works on an out-of-process proxy, P3 one path route (0.36 ms), P5 scoped hooks remove foreign callbacks; P4 deferred (D5). Spec corrected (release API, `Gone` via `IsWindow`, `LocationURL` dropped) |
 | T3.1 Context menu verbs | ✅ | 2026-11-01 | `2772509` + this commit | ADR-024: installer-only registration, manual toggle + Repair in Settings, never automatic. Both live checks passed: Settings card by UIA (Off/On/Stale/Repair/forced failure) and the real Explorer menu (folder and background verbs, special-character path, unregister removes both) |
@@ -135,7 +136,9 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 | D4 | Time-boxing by `CoCancelCall` then abandon-and-replace the thread, with a 3-wedge circuit breaker | As specified | An abandoned thread and its COM objects are leaked on purpose (bounded by the breaker). If P2 shows cancel doesn't work against Explorer proxies, only the abandon step remains and its 1 s becomes the effective limit | **DECIDED: accept with hard bounds** (04 B.6); no safe-cancel claim without P2 evidence
 | D5 | May the real "kill explorer.exe" test (and P4) run on this dev desktop? | No: disposable session or VM only; one supervised manual run at T3.5 if you agree | Killing the shell closes every Explorer window you have open (it restarts by itself). Without it, restart recovery is verified by fault injection only (O-24) | **DECIDED: no**; VM only; O-24 open
 
-## Open questions raised by T3.2.2 (need the user before T3.2.3)
+## Questions raised by T3.2.2 (both **answered and approved 2026-11-03**, specs updated: 04 § B.6/B.7/J, 06, 07, ADR-025 amendments)
+
+**Q1 → lifetime abandoned-worker cap 6**, breaker stays 3 wedges / 10 min, Retry allowed once more, never resets the counter, process-wide, UI shows permanent exhaustion (no Retry button). **Q2 → dedicated COM-free hook thread**, owns hook lifecycle, trivial callbacks, worker replacement never reinstalls hooks, thread budget ≤ 3 live + ≤ 7 abandoned over the process lifetime. The original questions are kept below for the record.
 
 | # | Question | Why it matters | Recommendation |
 |---|---|---|---|
@@ -165,6 +168,19 @@ missing (2026-10-31, 10.0.403 installed).
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-03 (Q1/Q2 specified, T3.2.3 started)
+- **Specs first, no contradiction found:** 04 § B.6 (cap 6, Retry semantics, `ThreadCap` wins when both limits hit, plain wording for permanent exhaustion, process thread budget), new § B.7 (hook thread), § J (failure modes H1–H11), L3, D.2, F, A; 06 (retry exhaustion, hook thread, worker replacement, thread budget tests); 07 (T3.2.3 scope: hook lifecycle moves from T3.2.4 into it); ADR-025 amendments with the reasoning.
+- **Thread-bound guarantees clarified (04 § B.7):** COM objects stay on the one worker; hooks only on the hook thread; the watchdog touches neither; the old "watchdog removes the abandoned worker's hooks" is withdrawn; callbacks no longer run inside COM waits.
+- **Spec changes beyond the two decisions (flagging, not silent):** the callback's window-class allow-list moved to the worker (a class lookup is a cross-process call, not "trivial"); a precedence rule (`ThreadCap` over `CircuitBreaker`) so the UI can tell permanent from retryable; the watchdog is counted in the thread budget.
+- **Code done (steps 1-2 of T3.2.3):**
+  - *Q1:* `MaxAbandonedThreads` default 6 (breaker unchanged at 3 in 10 min); `ThreadCap` now wins when both limits are reached by one wedge; `IsPermanentlyDisabled` and `CanRetry` let Settings (T3.4) show "off for this session" without a Retry button; Retry never touches the lifetime count; the count is process-wide (`TrackerProcessGuard`).
+  - *Thread budget:* `TrackerProcessGuard` counts live threads per kind (worker, hook, watchdog; 1 each) and abandoned workers (≤ 6) and hook threads (≤ 1, never replaced); the state machine reserves and releases the worker slot, so the budget is enforced, not just documented. Max 3 live, 10 owned at once.
+  - *Q2:* `SignalRouter` (pending bits + current worker target; clear-then-read protocol so no wake-up is lost; one outstanding wake-up; detached/replaced workers get nothing), `HookThread` (own thread and Win32 message loop, no COM; install, re-scope and uninstall only on it via posted commands; stale scope requests ignored; bounded start/stop with abandonment; poll-only fallback), `IWinEventApi` seam + `Win32WinEventApi`, `ThreadMessageWakeTarget` (for the worker host, not used yet).
+- **Tests:** App 480 → 537 (57 new: retry exhaustion 5, router 13, hook thread 24 incl. lifecycle/failure/worker replacement/real Win32 smoke, thread budget 9, source guard 1, plus changed state-machine cases); Core 396. Full App suite run 3 times in Release, no flakes. Mutation checks: letting a stale worker consume failed 3 tests. Swapping the router's clear/take order first only failed the stress test sometimes, so the race is now tested deterministically (test seams `GapInConsume`/`GapInRaise`, four forced interleavings, 5 new tests); the swapped-order mutant now fails deterministically. The stress test stays as a smoke test. All mutants reverted.
+- **Finding (real Win32):** hook scoping follows the process owning the event's *window*, not the process that raised it (04 § J).
+- **Not done yet in T3.2.3 (T3.2.3 stays unticked):** step 3: typed COM interfaces, `ComRef<T>`, `ComShellWindowsGateway` (+ fake), the STA worker host with message loop and its `IWakeTarget`, the watchdog thread; the COM/stale/wedge tests and live-RCW check. No COM code exists yet. Nothing is wired into `AppShell`.
+- **Next:** step 3 of T3.2.3. No commit made this session (none was requested).
 
 ### 2026-11-01 (T3.2.2 pure logic)
 - **Done:** `src/FolderNotes.App/Explorer/`: `TabMap<THandle>` (+ `ActiveTabResolver`, `ForegroundResolver`), `EvaluationScheduler` (throttle with leading/trailing edge, confirm, retry ladder, poll, reconcile; no timers, driven by a `TimeProvider`), `ComFailureClassifier`, `TrackerStateMachine` (+ `TrackerProcessGuard`, `TrackerLimits`, recovery back-off, `RootValidator`), `StatePublisher` (the single gate: generations, newest-seen sequence, no-op suppression), `EvaluationWatchdog` (cancel at 250 ms, abandon 1 s after the cancel, inclusive boundaries). No COM, Win32 or UI; a source-guard test enforces it, and that `AppShell`/`App` do not reference the tracker.

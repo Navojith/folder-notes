@@ -421,6 +421,26 @@ no claim of safe COM cancellation without probe evidence. D5 no Explorer kill on
 O-24 stays open). Elevated Explorer unsupported in v1 (no crash, no retry loop). No live monitor before T3.4;
 `GetStats()` and test fixtures are the diagnostics.
 
+**Amendments (2026-11-03, user decisions Q1 and Q2 raised by T3.2.2; details 04 § B.6, B.7, J):**
+- **Q1, lifetime abandoned-worker cap 6.** *Context:* the breaker trips at 3 wedges in 10 min and the cap was also 3, and
+  every wedge abandons a worker, so a trip always used the whole cap and the Settings Retry could never succeed.
+  *Decision:* breaker unchanged (3 in 10 min); the process-wide cap is **6**; Retry is allowed while fewer than 6 have been
+  abandoned, clears the breaker window, and never resets the counter; at 6 the tracker is `Disabled` (`ThreadCap`) until the
+  process restarts, and the UI shows that as permanent (no Retry button). *Why 6 and not unbounded or per-instance:* each
+  abandoned worker leaks a thread and its COM objects inside our process, so the cap is the hard bound on that leak; two
+  breaker episodes give a transient Explorer problem one second chance without ever allowing a crash loop; the counter
+  is process-wide so a new tracker object cannot reset it. *Consequence:* worst-case leak is 6 threads (plus ≤ 1 hook thread).
+- **Q2, WinEvent hooks on a dedicated hook thread.** *Context:* hooks on the single worker meant an abandoned worker kept
+  hooks that nobody pumps (cross-thread `UnhookWinEvent` is not allowed, its queue keeps filling), a replacement had to
+  reinstall them, and S5/P2 showed callbacks running inside the worker's COM waits. *Decision:* one COM-free thread owns
+  install/re-scope/uninstall and a message loop; callbacks set a bit and post at most one wake-up through a `SignalRouter`
+  that the supervisor re-points at the replacement worker; resolution and evaluation stay on the COM worker. *Why not keep
+  hooks on the worker plus probe P6:* it would leave the zombie-queue problem and cross-thread unhook open and make the
+  replacement more complex; one idle thread is cheaper than the unproven behaviour. *Consequences:* +1 live thread (budget
+  ≤ 3 live, ≤ 7 abandoned over the process lifetime; COM worker limits unchanged); new failure modes H1–H11 (04 § J), all
+  degrade to the poll and none count toward the breaker; the callback no longer filters by window class (moved to the worker).
+  The earlier text "the watchdog removes the abandoned worker's hooks" is withdrawn.
+
 **Probe results (T3.2.1, 2026-11-01; details in 04 § H):** D1 holds, hand-written interfaces match the SDK headers and work
 live, with two corrections to this ADR's first draft: release is `ComObject.FinalRelease()` (not
 `Marshal.FinalReleaseComObject`, which throws), and a closed window's objects return `E_FAIL`, so `Gone` also uses

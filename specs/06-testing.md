@@ -68,8 +68,12 @@ Names carry the requirement, e.g. `REQ031_RapidNavigation_PublishesFinalFolder`.
 - Publishing: latest-wins when the UI is slow; `Sequence` strictly increases; `Inactive` when the foreground window is
   not (and is not owned by) an Explorer frame.
 - `ComFailureClassifier`: every HRESULT in the 04 B.5 table; unknown HRESULTs are `Other`.
-- `TrackerStateMachine`: `Running → Recovering → Running`; 3 wedges in 10 min → `Disabled`; the fourth wedge after
-  10 quiet minutes does not trip it; `Stop`/`Start` from `Disabled` only through an explicit Retry.
+- `TrackerStateMachine`: `Running → Recovering → Running`; 3 wedges in 10 min → `Disabled` (`CircuitBreaker`); the fourth
+  wedge after 10 quiet minutes does not trip it; `Stop`/`Start` from `Disabled` only through an explicit Retry.
+  **Retry exhaustion (Q1):** with the default limits the first breaker trip (3 abandoned) accepts one Retry; the next 3
+  wedges reach 6 abandoned and the state is `Disabled` with `ThreadCap` (the permanent reason wins when both apply);
+  Retry is then refused (`ThreadCapReached`) however long we wait; Retry never changes the abandoned count; the count is
+  shared by two tracker instances (process-wide); wedges spread over more than 10 minutes can still reach the cap.
 
 **Stale references, disconnected objects (fault injection):** `Gone` on one tab leaves the others working; `Gone` on the
 root triggers recovery and publishes `Inactive` first; `Transient` retries on the ladder and ends; `Other` ×3 drops the
@@ -82,10 +86,29 @@ same events as a fresh start, no manual restart, and no `IShellWindows` creation
 the gated test below.
 
 **Bounds and ordering (user decisions D2–D4):** a second tracker `Start` is refused; after N wedges the number of live
-and abandoned threads never exceeds the cap (1 live, ≤ 3 abandoned) and at the cap `Retry` stays `Disabled`; an
+and abandoned threads never exceeds the cap (1 live worker, ≤ 6 abandoned workers) and at the cap `Retry` stays `Disabled`; an
 abandoned thread's late result is never published (generation gate); with all hooks disabled the state still
 converges within 2.5 s through the poll; an older evaluation finishing after a newer one is dropped; no publish for
 an unchanged state; an elevated/denied frame is not retried until it navigates or regains foreground.
+
+**Hook thread (Q2; 04 § B.7, J):**
+- *Lifecycle:* install runs on the hook thread (thread-identity asserted); uninstall runs on the same thread; `Stop`
+  uninstalls before the thread exits; install failure → poll-only with `HooksActive = false` and no breaker count;
+  uninstall twice, install twice and `Quit` before `Install` are harmless; an unresponsive hook thread is abandoned after
+  the bounded wait and never replaced; a stale `SetScope` is ignored.
+- *Callbacks trivial:* the handler touches no gateway, COM or UI type (source guard); 100 000 events from many threads
+  produce at most one outstanding wake-up per worker; no bit is lost. **The guarantee is deterministic:** the router has two
+  test seams (a gap inside `Consume` and one inside `Raise`) and the tests force every interleaving (raise before the clear, raise
+  between clear and take, a whole consume between a raise's record and post, two racing raisers); a mutant with the clear/take order
+  swapped fails them every time. A 4 000-round concurrent stress test remains as a smoke test only.
+- *Worker replacement:* detaching the old and attaching a new worker does not call install/uninstall on the hook
+  layer (fake hook API call count unchanged); events during the gap are delivered to the replacement; a detached
+  worker receives no further wake-ups.
+- *Process-wide thread budget:* live workers ≤ 1, hook ≤ 1, watchdog ≤ 1 across two tracker instances; abandoned
+  workers ≤ 6 and abandoned hook threads ≤ 1 for the whole process; a kind at its limit refuses a new thread; releasing
+  a live thread frees its slot, abandoning does not.
+- *Real Win32 smoke (not Explorer):* a real hook thread installs a scoped hook, receives a `NotifyWinEvent` raised by
+  the test, wakes a consumer, uninstalls, and the thread exits; thread count returns to baseline.
 
 **Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, a new thread
 serves the next signal, the old thread's late result is discarded (generation), the UI thread is never blocked,

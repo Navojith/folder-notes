@@ -13,8 +13,36 @@ public class ExplorerLogicSourceGuardTests
     private static readonly string[] LogicFiles =
     [
         "ActiveFolderState.cs", "ComFailureClassifier.cs", "TabMap.cs", "EvaluationScheduler.cs",
-        "StatePublisher.cs", "EvaluationWatchdog.cs", "TrackerStateMachine.cs",
+        "StatePublisher.cs", "EvaluationWatchdog.cs", "TrackerStateMachine.cs", "SignalRouter.cs",
     ];
+
+    /// <summary>04 B.7 / J-H11: the hook thread and everything it calls are COM-free, file-system-free and UI-free.</summary>
+    private static readonly string[] HookLayerFiles = [Path.Combine("Native", "HookThread.cs"), Path.Combine("Native", "HookNative.cs"), "SignalRouter.cs"];
+
+    private static readonly (string Name, Regex Pattern)[] BannedInHookLayer =
+    [
+        ("COM references", new Regex(@"\b(ComRef|ComObject|GeneratedComInterface|ComImport|CoInitialize\w*|CoCreateInstance|IShellWindows\w*|IShellWindowsGateway|IWebBrowser2)\b")),
+        ("Marshal class", new Regex(@"\bMarshal\.")),
+        ("UI dispatching", new Regex(@"\b(IUiDispatcher|DispatcherQueue|Microsoft\.UI|Windows\.UI)\b")),
+        ("file system", new Regex(@"\b(System\.IO|File\.|Directory\.|Path\.|FileInfo|DirectoryInfo)\b")),
+        ("SQLite / notes", new Regex(@"\b(Sqlite|INoteStore|IFolderIdentityService)\w*")),
+    ];
+
+    [Fact]
+    public void NFR01_H11_The_hook_layer_references_no_COM_UI_or_file_system_types()
+    {
+        var dir = Path.Combine(RepoFiles.AppDir, "Explorer");
+        foreach (var name in HookLayerFiles)
+        {
+            var path = Path.Combine(dir, name);
+            File.Exists(path).ShouldBeTrue(path);
+            var text = StripComments(File.ReadAllText(path));
+            foreach (var (what, pattern) in BannedInHookLayer)
+            {
+                pattern.IsMatch(text).ShouldBeFalse($"{name} must not use {what} (hook thread never makes COM, UI or file calls, 04 B.7)");
+            }
+        }
+    }
 
     private static readonly (string Name, Regex Pattern)[] Banned =
     [

@@ -64,11 +64,48 @@ internal sealed record TrackerLimits
     public TimeSpan BreakerWindow { get; init; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
-    /// Most threads ever abandoned in this process (04 B.6: 3). NOTE: with the breaker also at 3 wedges, a trip
-    /// uses up the whole cap, so <see cref="TrackerStateMachine.Retry"/> can never succeed after a trip. Raised
-    /// as a specification question; see 09 (Q1).
+    /// Most COM workers ever abandoned in this process (04 B.6, decision Q1: 6). The breaker trips at 3, so the cap
+    /// allows two breaker episodes: one explicit Retry works, then the tracker stays off until the app restarts.
+    /// Retry never resets the count, and the count is process-wide (<see cref="TrackerProcessGuard"/>).
     /// </summary>
-    public int MaxAbandonedThreads { get; init; } = 3;
+    public int MaxAbandonedThreads { get; init; } = TrackerThreadBudget.DefaultMaxAbandonedWorkers;
+}
+
+/// <summary>The kinds of thread the tracker may own (04 B.6 thread budget).</summary>
+internal enum TrackerThreadKind
+{
+    /// <summary>The one STA thread that owns every COM object.</summary>
+    Worker,
+
+    /// <summary>The COM-free thread that owns the WinEvent hooks (04 B.7).</summary>
+    Hook,
+
+    /// <summary>The thread that cancels and abandons a stuck worker.</summary>
+    Watchdog,
+}
+
+/// <summary>Process-wide thread limits per kind (04 B.6): live threads and lifetime abandoned threads.</summary>
+internal sealed record TrackerThreadBudget
+{
+    public static TrackerThreadBudget Default { get; } = new();
+
+    public int MaxLiveWorkers { get; init; } = 1;
+
+    public int MaxLiveHook { get; init; } = 1;
+
+    public int MaxLiveWatchdog { get; init; } = 1;
+
+    /// <summary>Default lifetime cap on abandoned workers (Q1). The policy lives in <see cref="TrackerLimits.MaxAbandonedThreads"/>.</summary>
+    public const int DefaultMaxAbandonedWorkers = 6;
+
+    /// <summary>Lifetime cap on abandoned hook threads: an abandoned hook thread is never replaced (04 B.7).</summary>
+    public int MaxAbandonedHook { get; init; } = 1;
+
+    /// <summary>Most threads the tracker owns at once when nothing has wedged: 3.</summary>
+    public int MaxLiveTotal => MaxLiveWorkers + MaxLiveHook + MaxLiveWatchdog;
+
+    /// <summary>Most threads the tracker can own at any moment: 3 live + 6 abandoned workers + 1 abandoned hook = 10.</summary>
+    public int MaxOwnedAtOnce => MaxLiveTotal + DefaultMaxAbandonedWorkers + MaxAbandonedHook;
 }
 
 /// <summary>
@@ -78,15 +115,100 @@ internal sealed record TrackerLimits
 internal sealed class TrackerProcessGuard
 {
     private readonly Lock _gate = new();
+    private readonly TrackerThreadBudget _budget;
+    private readonly int[] _live = new int[3];
     private object? _owner;
     private int _abandoned;
+    private int _abandonedHook;
+
+    public TrackerProcessGuard(TrackerThreadBudget? budget = null) => _budget = budget ?? TrackerThreadBudget.Default;
 
     public static TrackerProcessGuard Shared { get; } = new();
 
+    public TrackerThreadBudget Budget => _budget;
+
+    /// <summary>Workers abandoned so far in this process; never reset (not even by Retry).</summary>
     public int AbandonedThreads
     {
         get { lock (_gate) { return _abandoned; } }
     }
+
+    public int AbandonedHookThreads
+    {
+        get { lock (_gate) { return _abandonedHook; } }
+    }
+
+    public int LiveThreads(TrackerThreadKind kind)
+    {
+        lock (_gate) { return _live[(int)kind]; }
+    }
+
+    /// <summary>Live threads of every kind plus every abandoned one: what the tracker owns right now.</summary>
+    public int OwnedThreads
+    {
+        get { lock (_gate) { return _live.Sum() + _abandoned + _abandonedHook; } }
+    }
+
+    /// <summary>Reserve a slot before creating a thread. False means the kind is at its limit: do not create it.</summary>
+    public bool TryReserveThread(TrackerThreadKind kind)
+    {
+        lock (_gate)
+        {
+            if (_live[(int)kind] >= LiveLimit(kind))
+            {
+                return false;
+            }
+
+            if (kind == TrackerThreadKind.Hook && _abandonedHook >= _budget.MaxAbandonedHook)
+            {
+                return false; // an abandoned hook thread is never replaced in this process
+            }
+
+            _live[(int)kind]++;
+            return true;
+        }
+    }
+
+    /// <summary>The thread ended (or was never created): free its slot.</summary>
+    public void ReleaseThread(TrackerThreadKind kind)
+    {
+        lock (_gate)
+        {
+            if (_live[(int)kind] > 0)
+            {
+                _live[(int)kind]--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The thread is stuck and left behind on purpose: its slot is freed (it no longer serves the tracker) but it
+    /// counts against the lifetime cap of its kind. Returns the abandoned count for the kind.
+    /// </summary>
+    public int AbandonThread(TrackerThreadKind kind)
+    {
+        lock (_gate)
+        {
+            if (_live[(int)kind] > 0)
+            {
+                _live[(int)kind]--;
+            }
+
+            return kind switch
+            {
+                TrackerThreadKind.Worker => ++_abandoned,
+                TrackerThreadKind.Hook => ++_abandonedHook,
+                _ => 0, // a watchdog is never abandoned (it is not a COM thread); its slot is simply freed
+            };
+        }
+    }
+
+    private int LiveLimit(TrackerThreadKind kind) => kind switch
+    {
+        TrackerThreadKind.Worker => _budget.MaxLiveWorkers,
+        TrackerThreadKind.Hook => _budget.MaxLiveHook,
+        _ => _budget.MaxLiveWatchdog,
+    };
 
     public bool TryAcquire(object owner)
     {
@@ -113,13 +235,6 @@ internal sealed class TrackerProcessGuard
         }
     }
 
-    public int RecordAbandoned()
-    {
-        lock (_gate)
-        {
-            return ++_abandoned;
-        }
-    }
 }
 
 /// <summary>
@@ -188,6 +303,12 @@ internal sealed class TrackerStateMachine
             return StartResult.AnotherTrackerActive;
         }
 
+        if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
+        {
+            _guard.Release(this);
+            return StartResult.AnotherTrackerActive; // defensive: the process budget says a worker is already live
+        }
+
         State = TrackerState.Running;
         LiveWorkers = 1;
         return StartResult.Started;
@@ -199,6 +320,11 @@ internal sealed class TrackerStateMachine
     /// </summary>
     public void Stop()
     {
+        if (LiveWorkers == 1)
+        {
+            _guard.ReleaseThread(TrackerThreadKind.Worker);
+        }
+
         LiveWorkers = 0;
         _recoveryAttempt = 0;
         _publisher.PublishInactive();
@@ -254,20 +380,22 @@ internal sealed class TrackerStateMachine
 
         int generation = _publisher.Abandon();
         LiveWorkers = 0;
-        int abandoned = _guard.RecordAbandoned();
+        int abandoned = _guard.AbandonThread(TrackerThreadKind.Worker);
 
         var now = _clock.GetTimestamp();
         Expire();
         _wedges.Enqueue(now);
 
+        // The permanent reason wins when both limits are reached by the same wedge (04 B.6), so the UI can tell
+        // "Retry may work" (CircuitBreaker) from "off until the app restarts" (ThreadCap).
         DisabledReason? reason = null;
-        if (_wedges.Count >= _limits.BreakerWedges)
-        {
-            reason = Explorer.DisabledReason.CircuitBreaker;
-        }
-        else if (abandoned >= _limits.MaxAbandonedThreads)
+        if (abandoned >= _limits.MaxAbandonedThreads)
         {
             reason = Explorer.DisabledReason.ThreadCap;
+        }
+        else if (_wedges.Count >= _limits.BreakerWedges)
+        {
+            reason = Explorer.DisabledReason.CircuitBreaker;
         }
 
         if (reason is { } r)
@@ -293,6 +421,11 @@ internal sealed class TrackerStateMachine
             throw new InvalidOperationException("A worker is already live; at most one is allowed.");
         }
 
+        if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
+        {
+            throw new InvalidOperationException("The process thread budget refuses another live worker.");
+        }
+
         LiveWorkers = 1;
     }
 
@@ -309,12 +442,27 @@ internal sealed class TrackerStateMachine
             return RetryResult.ThreadCapReached;
         }
 
+        if (!_guard.TryReserveThread(TrackerThreadKind.Worker))
+        {
+            return RetryResult.ThreadCapReached; // defensive; cannot happen while the slot is free
+        }
+
+        // The lifetime abandoned count is deliberately NOT touched: Retry buys one more cycle, not new budget.
         _wedges.Clear();
         DisabledReason = Explorer.DisabledReason.None;
         State = TrackerState.Running;
         LiveWorkers = 1;
         return RetryResult.Started;
     }
+
+    /// <summary>
+    /// True when the tracker is off for the rest of this process (reason <see cref="DisabledReason.ThreadCap"/>):
+    /// Settings must say so plainly and offer no Retry (04 B.6).
+    /// </summary>
+    public bool IsPermanentlyDisabled => State == TrackerState.Disabled && DisabledReason == DisabledReason.ThreadCap;
+
+    /// <summary>True when the Retry action would be accepted right now (what Settings uses to show the button).</summary>
+    public bool CanRetry => State == TrackerState.Disabled && _guard.AbandonedThreads < _limits.MaxAbandonedThreads;
 
     private void Expire()
     {

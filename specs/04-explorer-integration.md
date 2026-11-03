@@ -94,7 +94,10 @@ The tracker is split so almost everything can be unit-tested without Explorer:
 | `EvaluationScheduler` | pure state machine, takes a `TimeProvider` | The coalescing rules (§D). |
 | `ComFailureClassifier` | pure | HRESULT → `Transient` / `Gone` / `Other` (§B.5). |
 | `TrackerStateMachine` | pure | `Stopped → Running ⇄ Recovering`, `Wedged → Running`, `Disabled` (§B.6, §F). |
-| `ExplorerTracker` | glue | STA thread, WinEvent hooks, message loop, watchdog, publishing. No decision the pure parts could make. |
+| `SignalRouter` | pure + one `Interlocked` word | The pending-signal bits and the current worker's wake-up target; `Attach`/`Detach` (§B.7). |
+| `HookThread` | Win32 glue (no COM) | The dedicated hook thread: message loop, install/re-scope/uninstall, trivial callbacks (§B.7). |
+| `TrackerThreadBudget` | pure (in `TrackerProcessGuard`) | Process-wide thread counters per kind: live and abandoned (§B.6). |
+| `ExplorerTracker` | glue | COM worker (STA) thread, hook thread, watchdog thread, publishing. No decision the pure parts could make. |
 
 Lives in `FolderNotes.App/Explorer/`. **Not started by `AppShell` in T3.2**; T3.4 starts it behind the panel
 setting (REQ-037). With the panel off the tracker is not running at all: no thread, no hooks, no timer.
@@ -116,8 +119,8 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    marshaling, `HRESULT` handling incl. `[PreserveSig]` vs throwing, `QueryInterface`/casting, RCW lifetime and
    release). If the probes show unreliable interop, **switch to CsWin32; do not add workarounds around a wrong
    interop definition.**
-2. **One thread owns every COM object.** One dedicated `STA` thread named `ExplorerTracker` with its own message
-   loop (also required by the out-of-context WinEvent hooks). Every RCW is created, used and released on it.
+2. **One thread owns every COM object.** One dedicated `STA` thread named `ExplorerTracker.Worker` with its own message
+   loop (an STA must pump; the WinEvent hooks are *not* on this thread, see B.7). Every RCW is created, used and released on it.
    No COM reference leaves that thread; what crosses to the UI is the immutable `ActiveFolderState` (an nint and
    a string).
 3. **Ownership.** Every RCW lives in a `ComRef<T>` (`IDisposable`; `Release()` = **`ComObject.FinalRelease()`**
@@ -128,10 +131,11 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    `CoUninitialize`. A live-RCW counter (always on; it is one integer) is asserted to be 0 at the end of every
    gateway test. *Why prompt release matters beyond our memory:* a reference we keep to a closed tab keeps that
    object alive inside Explorer, so a stale reference is a small leak in Explorer, against principle 1.
-4. **Not re-entrant.** While the STA thread waits on an outgoing call, COM dispatches **WinEvent callbacks** to it
-   (S5/P2 measured this; posted thread messages are not dispatched). Callbacks therefore do nothing but set a flag
-   and post one message, and the evaluation handler keeps a guard: if an evaluation is running, a new request only
-   sets the dirty flag.
+4. **Not re-entrant.** While a thread that installed an out-of-context hook waits on an outgoing COM call, COM
+   dispatches the **WinEvent callbacks** to it (S5/P2 measured this; posted thread messages are not dispatched). That
+   is why the hooks moved to their own thread (B.7), where there are no COM waits. Callbacks still do nothing but set
+   a bit and post at most one message, and the evaluation handler keeps a guard: if an evaluation is running, a new
+   request only sets the dirty flag.
 5. **Failure classification** (`ComFailureClassifier`). Nothing throws out of the loop: every entry point is
    wrapped, failures are counted, and logged at most once per 10 s per class.
 
@@ -152,21 +156,76 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
      starts a fresh STA thread with an empty cache. Anything the old thread later produces carries the old
      generation and is dropped. Abandoned COM objects are **not** released from another thread (it could
      deadlock); they are leaked once, deliberately.
-   - *Circuit breaker.* 3 wedges within 10 min → `Disabled`: publish `Inactive`, log once, and Settings shows
-     "Explorer tracking paused after repeated problems" with a Retry (T3.4). It never retries by itself in a loop.
-   - *Hard bounds (user decision D4).* (1) **At most one tracker instance per process** (a second `Start` on any
-     instance while one is active is refused; enforced by a process-wide guard and tested). (2) **At most one live
-     STA thread serves the tracker, plus at most one abandoned thread per wedge, and at most 3 abandoned threads
-     ever per process lifetime** (the breaker is tripped by the 3rd wedge, and `Retry` after it is allowed only while
-     fewer than 3 abandoned threads exist; at 3 the tracker stays `Disabled` until the app restarts). A replacement
-     thread is never started while the previous one is still being cancelled. (3) **An abandoned thread cannot
-     publish:** the single publish gate compares the caller's generation with the current one, and abandoning
-     invalidates the generation *before* the replacement starts; also the abandoned thread's hooks and timers are
-     removed by the watchdog (hooks are keyed by thread) and its message loop is told to quit. (4) Abandoned COM
-     objects are leaked at most once per wedge and counted in `TrackerStats`. (5) **Until proven by probe P2, no text
-     or code claims COM calls can be cancelled safely.** If P2 fails, the 1 s abandonment is the effective limit and
-     this section says so.
+   - *Circuit breaker.* 3 wedges within 10 min → `Disabled` (reason `CircuitBreaker`): publish `Inactive`, log once,
+     and Settings shows "Explorer tracking paused after repeated problems" with a **Retry** (T3.4). It never retries by
+     itself in a loop. An explicit Retry clears the breaker's wedge window and allows one more recovery cycle.
+   - *Hard bounds (user decisions D4, Q1, 2026-11-03).* (1) **At most one tracker instance per process** (a second
+     `Start` on any instance while one is active is refused; enforced by a process-wide guard and tested). (2) **At
+     most one live COM worker (STA) thread serves the tracker, plus at most one abandoned worker per wedge, and at
+     most 6 abandoned workers ever per process lifetime** (Q1: the breaker still trips at 3 wedges in 10 min, so the
+     cap allows two breaker episodes: three abandoned workers trip the breaker, one Retry permits a second cycle, and
+     after the 6th abandoned worker the tracker is `Disabled` with reason `ThreadCap` for the rest of the process).
+     **Retry never resets the lifetime counter**, and the counter is process-wide (the shared `TrackerProcessGuard`),
+     not per tracker instance, so creating a new tracker object cannot buy new threads. `Retry` is refused once the
+     cap is reached. A replacement worker is never started while the previous one is still being cancelled. When both
+     limits are reached by the same wedge the reason is `ThreadCap` (the permanent one wins). (3) **An abandoned worker
+     cannot publish:** the single publish gate compares the caller's generation with the current one, and abandoning
+     invalidates the generation *before* the replacement starts. An abandoned worker owns no hooks (they live on the
+     hook thread, §B.7), so there is nothing of ours left delivering events to it: the router (§B.7) is detached
+     from it before the replacement attaches. (4) Abandoned COM objects are leaked at most once per wedge and
+     counted in `TrackerStats`. (5) **Until proven by probe P2, no text or code claims COM calls can be cancelled
+     safely.** If P2 fails, the 1 s abandonment is the effective limit and this section says so.
+   - *Permanent exhaustion is shown plainly (Q1).* The state machine exposes `Disabled` with reason `CircuitBreaker`
+     (Retry offered) or `ThreadCap` (permanent). T3.4's Settings card must tell them apart: `CircuitBreaker` says
+     "Explorer tracking paused after repeated problems." with **Retry**; `ThreadCap` says "Explorer tracking is turned off
+     for this session after repeated problems. Restart Folder Notes to try again." with **no Retry button** (not a
+     disabled one: an action that can never work is not offered). Both reasons are logged once, with the counts.
+   - *Process thread budget (Q2).* Threads the tracker may own, all named `ExplorerTracker.*`: **live** 1 COM worker,
+     1 hook thread (§B.7), 1 watchdog thread (waits on an event, so it is idle unless an evaluation runs); at most 3
+     live at any time. **Abandoned** (leaked on purpose, lifetime of the process): ≤ 6 workers, ≤ 1 hook thread. So the
+     tracker never owns more than 3 + 7 = **10 threads at any moment of the process's life** (live plus left-behind), and
+     ≤ 3 when nothing has wedged. The existing COM worker limits (1 live, ≤ 1 per wedge, breaker 3/10 min) are unchanged by the hook
+     thread. The budget is enforced by the same process-wide guard (one counter per kind) and tested.
    - `Stop`/`Dispose` never wait unbounded: post `WM_QUIT`, wait ≤ 2 s, then abandon.
+7. **The hook thread (Q2, 2026-11-03).** WinEvent hooks do **not** live on the COM worker. One dedicated thread
+   `ExplorerTracker.Hooks` owns them:
+   - *It never makes a COM call* (no `CoInitialize`, no interface pointer, no RCW). It runs a plain Win32 message loop
+     (`GetMessage`) because out-of-context hook callbacks are delivered through that loop.
+   - *It owns the hook lifecycle.* Install, re-scope and uninstall all happen on this thread (`UnhookWinEvent` must run
+     on the thread that called `SetWinEventHook`). The worker (and `Stop`) only send it commands through posted thread
+     messages: `Install`, `SetScope(pid)`, `Uninstall`, `Quit`. Commands execute in order on the hook thread, so there
+     is no concurrent access to hook handles.
+   - *Callbacks are trivial:* map the event id to a bit, `Interlocked.Or` it into a pending-signal word, and, only if
+     the word was zero, post **one** wake-up message to the current worker. No class-name lookup, no `IsWindow`, no
+     path, filesystem, COM, logging, allocation or UI work. Scoping (§D.2) is done by the `idProcess` argument of
+     `SetWinEventHook`, not by filtering in the callback.
+   - *Scope decisions are the worker's.* On `FOREGROUND` the worker evaluates which frame is foreground and asks the
+     hook thread to `SetScope(pid)` for the frame's process. The hook thread does not resolve anything.
+   - *The router decouples hooks from workers.* A `SignalRouter` holds the pending-signal word and the **current**
+     worker's wake-up target (thread id + generation). `Attach(worker)` / `Detach(worker)` are called by the
+     supervisor. Replacing an abandoned worker is `Detach(old)` then `Attach(new)` and **never touches a hook**. While
+     no worker is attached, signals accumulate in the word and the new worker's first evaluation consumes them.
+   - *Wake-ups are bounded.* At most one wake-up message is outstanding per worker (the worker clears the pending
+     word **before** it starts an evaluation, so an event arriving during the evaluation posts again). A wedged worker
+     therefore holds at most one unread message, and once detached receives none.
+   - *Start/stop order.* Start: reserve budget → hook thread up and `Install` acknowledged (or failed) → watchdog →
+     worker. Stop: `Detach` worker → `Uninstall` on the hook thread (≤ 1 s) → `Quit` → worker quit (≤ 2 s) → watchdog.
+     Each step is bounded; a step that overruns is abandoned, never waited for.
+   - *Failure of the hook layer is degraded, not fatal.* If `SetWinEventHook` fails, the hook thread dies, or it does
+     not acknowledge in time, the tracker keeps running on the poll and the 30 s reconciliation (D2) with at most 2 s of
+     staleness, logs once, and reports `HooksActive = false` in `TrackerStats`. It does not count toward the circuit
+     breaker (no COM wedge happened).
+   - *Hook thread restarts are bounded.* A hook thread that exited is not restarted by itself; the next `Start()` or
+     `Retry()` may create one new hook thread. A hook thread that had to be abandoned is **never replaced in this
+     process** (poll-only from then on). So hook threads are created at most once per `Start`, abandoned at most once.
+
+   *Thread-bound guarantees after this change (clarified, nothing else changes):* (a) every COM object is created, used
+   and released on the one live worker, as before; (b) hooks are installed, re-scoped and removed only on the hook
+   thread; (c) the watchdog calls `CoCancelCall` and signals "abandon", and touches neither hooks nor COM objects;
+   (d) the earlier wording "the abandoned thread's hooks are removed by the watchdog" is **withdrawn**: the abandoned
+   worker has no hooks; (e) WinEvent callbacks no longer run inside the worker's COM waits (S5/P2's 7 callbacks in 257 ms
+   were delivered to the installing thread, which is now the hook thread). The worker can still receive its own posted
+   wake-up only between waits, and keeps the "evaluation running → set dirty flag" guard (§B.4) as a defence.
 
 #### C. Browser-to-tab mapping (the cache)
 
@@ -205,9 +264,11 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    `EVENT_OBJECT_CREATE` / `DESTROY` (map upkeep). All out-of-context with `WINEVENT_SKIPOWNPROCESS`.
 2. **Idle cost control.** `NAMECHANGE` is global and chatty (browsers, terminals and editors rename windows all
    the time). So those hooks are **scoped with `idProcess` = the foreground Explorer frame's process** and
-   re-scoped on every foreground change, and they are removed while no Explorer frame is foreground. The callback
-   does only: check `idObject == OBJID_WINDOW`, compare the root window's class against a tiny allow-list, set
-   the dirty flag, post at most one message.
+   re-scoped on every foreground change, and they are removed while no Explorer frame is foreground (the worker asks
+   the hook thread to do both, §B.7). The callback runs on the hook thread and does only: check `idObject ==
+   OBJID_WINDOW` (a parameter compare), set the event's bit, post at most one message. **Changed 2026-11-03 (Q2):** the
+   class-name allow-list check moved out of the callback, because reading a window's class is a call into another
+   process's window; the worker applies it when it consumes the bits (cheap: the process is already scoped).
 3. **Coalescing = throttle with a trailing edge, not a debounce** (decision D3). A debounce delays *every* change by
    its quiet period and can starve under a steady stream; S1's worst navigate was 107 ms, so a 50 ms debounce
    could push REQ-031's 150 ms to about 167 ms. The scheduler:
@@ -267,8 +328,9 @@ shell gives; checking that it is a real directory is the consumer's job (`IFolde
   `ComRef` (dead proxies release fast; failures swallowed); (3) state `Recovering`; (4) try to recreate
   `IShellWindows` **only when `GetShellWindow() != 0`**, at +250 ms, +500 ms, 1 s, 2 s, then every 5 s, with no
   limit while the app runs; (5) on success rebuild the map, evaluate, publish. The WinEvent hooks belong to the
-  system, not to Explorer, so they survive a restart; they are re-scoped (§D.2) and reinstalled if installing
-  ever failed. The user never has to restart Folder Notes.
+  system, not to Explorer, and to the hook thread, not the worker (§B.7), so they survive both an Explorer restart
+  and a worker replacement; they are re-scoped (§D.2) on the hook thread and reinstalled there if installing ever
+  failed. The user never has to restart Folder Notes.
 - **Do not create `ShellWindows` while the shell is down.** On this machine `CLSID_ShellWindows` is registered as
   `LocalServer32 = rundll32.exe shell32.dll,SHCreateLocalServerRunDll {9BA05972-…}`: if Explorer's class
   registration is absent, COM starts its own **empty, private** `ShellWindows` server in a `rundll32.exe` and
@@ -285,8 +347,8 @@ shell gives; checking that it is a real directory is the consumer's job (`IFolde
 - **Idle CPU.** No timer unless an Explorer frame is foreground; hooks scoped by process; no allocation on a no-op
   evaluation; the watchdog waits on an event, not a sleep loop. Budget **< 0.1 %** of one core over 60 s with
   Explorer foreground and untouched, **0 %** with another app foreground (06).
-- **Stop.** `Stop()` removes hooks and timers, releases all `ComRef`s, ends the thread (bounded wait, §B.6) and
-  publishes `Inactive`. `Start()` after `Stop()` starts from an empty cache.
+- **Stop.** `Stop()` removes hooks (on the hook thread) and timers, releases all `ComRef`s, ends the worker, hook and
+  watchdog threads (bounded waits, §B.6/B.7, in the order given in B.7) and publishes `Inactive`. `Start()` after `Stop()` starts from an empty cache.
 - **The tracker only reads.** It never posts to, subclasses, injects into or modifies an Explorer window. A tracker
   fault ends in `Inactive` and one log line.
 
@@ -298,7 +360,7 @@ Not every Explorer event can be observed reliably. Each limit and what the desig
 |---|---|---|
 | L1 | WinEvents are asynchronous, unordered relative to COM state, can be coalesced or dropped under load, and `NAMECHANGE` does not guarantee the *path* changed. | Every event only means "re-read"; truth is read from the shell; the poll and the 30 s reconciliation stay. |
 | L2 | There is **no documented event for "active tab changed"** or "navigation committed". S1 saw `NAMECHANGE` / `SHOW` / `HIDE` fire for them on build 22631; that is observed behaviour, not a contract, and may differ on 24H2 and later builds, and on Windows 10. | Poll fallback stays; the T3.5 matrix runs on 3 builds; without the tab class the logic degrades to one implicit tab. |
-| L3 | Out-of-context hooks need a message loop. **Measured (S5/P2):** while the STA thread waits inside an outgoing COM call, COM's wait loop still dispatches WinEvent callbacks to it (7 during one 257 ms call), but not posted thread messages. | Callbacks only set a flag and post (§B.4); the evaluation is posted, so it is not re-entered; time-boxed calls (§B.6). |
+| L3 | Out-of-context hooks need a message loop. **Measured (S5/P2):** while a hook-owning STA thread waits inside an outgoing COM call, COM's wait loop still dispatches WinEvent callbacks to it (7 during one 257 ms call), but not posted thread messages. | Hooks live on a separate COM-free hook thread (§B.7, Q2), so no callback runs inside a COM wait; callbacks only set a bit and post one message (§B.4); time-boxed calls (§B.6). |
 | L4 | COM has no per-call timeout. `CoCancelCall` works only for calls through a COM proxy and only while the thread is in a COM wait. | Cancel, then abandon the thread; circuit breaker. |
 | L5 | `IShellWindows` registers a window after its HWND exists and removes it around the HWND's destruction. | Retry ladder; `IsWindow` and `Gone` checks; reconciliation. |
 | L6 | `TaskbarCreated` is broadcast only to top-level windows, only when a taskbar is created, and not when the shell restarts without one. | Forwarded from the tray window **and** detected independently (`Gone`, shell process change). |
@@ -385,6 +447,29 @@ is noise at this rate. What is proven is that scoping removes the callbacks enti
 verified end to end in T3.2.5 and T3.5.
 
 **P4** (shell down, `rundll32` private server) is not run: it needs Explorer killed (D5). It stays open as O-24.
+
+#### J. Failure modes introduced by the separate hook thread (Q2, 2026-11-03)
+
+*Measured while building it (T3.2.3, real Win32, no Explorer):* a global `EVENT_SYSTEM_FOREGROUND` hook and a hook scoped by `idProcess` both
+deliver to the hook thread's message loop. **Scoping is by the process that owns the *window* of the event**, not by the process that
+called `NotifyWinEvent`: an event raised for the desktop window did not reach a hook scoped to the raising process; one raised for a
+window of that process did. This matches how Explorer's own windows behave and is why the scope is the Explorer frame's process.
+
+Reviewed before implementation. Each has an owner and a test (06 § Hook thread).
+
+| # | Failure mode | Effect | Handling |
+|---|---|---|---|
+| H1 | `SetWinEventHook` returns 0, or the hook thread throws or exits | No events | Degraded, not fatal: poll + reconciliation keep the panel ≤ 2 s behind; `HooksActive = false`; logged once; no breaker count. One re-create per `Start`/`Retry` |
+| H2 | The hook thread does not respond to `Uninstall`/`Quit` (stuck in `UnhookWinEvent` or the loop) | `Stop` would wait | Bounded waits (1 s, then abandon); an abandoned hook thread is never replaced in this process; ≤ 1 abandoned hook thread ever; the system removes its hooks if the thread ends |
+| H3 | Event storm (a scoped process spams `NAMECHANGE`) | Hook thread CPU, queue pressure | Callback = one `Interlocked.Or` and at most one post (word was zero); no allocation; messages cannot pile up |
+| H4 | Lost wake-up: bit set just after the worker cleared the word | A change missed | Worker clears the word **before** it evaluates; any bit set later re-posts. Test with a concurrency hammer. The poll is the backstop anyway |
+| H5 | Router points at an abandoned or dead worker | Posts go nowhere or fill a dead queue | `Detach(old)` precedes `Attach(new)`; a post to a detached or dead target is dropped; generation compared on attach/detach |
+| H6 | Start/stop ordering: a worker is attached before hooks are acknowledged, or hooks outlive the worker | Early events lost; callbacks into nothing | Fixed order in B.7; signals accumulate while no worker is attached |
+| H7 | `UnhookWinEvent` called from the wrong thread | Hook leaks, call fails | All hook calls only on the hook thread (commands by posted message); test asserts thread identity |
+| H8 | Re-scope race: a stale `SetScope(pid)` arrives after a newer one | Hooks scoped to the wrong process | Commands are processed in order; `SetScope` carries a sequence, older ones are ignored; the worker re-requests on every foreground change |
+| H9 | A callback runs while the hook thread is applying a command | Torn hook state | Same thread: callbacks and commands never overlap |
+| H10 | Process-wide thread growth (restart loops) | Unbounded threads | Thread budget in B.6: ≤ 3 live, ≤ 7 abandoned over the process lifetime; `Start` is refused when a kind is exhausted |
+| H11 | Hook thread accidentally touches COM or UI (a later change) | Re-introduces the COM-wait re-entrancy or a hang | Source-guard test: `HookThread`/`SignalRouter` reference no `ComRef`, `ComObject`, `Marshal`, gateway types or `IUiDispatcher` |
 
 #### I. Interpretations fixed while implementing the pure logic (T3.2.2, 2026-11-01)
 
