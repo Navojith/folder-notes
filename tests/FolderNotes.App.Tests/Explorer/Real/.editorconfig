@@ -1,0 +1,11 @@
+# Test-only lab code that drives the real Explorer (T3.2.5): culture-neutral by construction (numbers go into reports),
+# late-bound COM on purpose (an oracle independent of the tracker's typed interop), and P/Invoke results that are ignored in cleanup.
+[*.cs]
+dotnet_diagnostic.CA1304.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1806.severity = none
+dotnet_diagnostic.CA1711.severity = none
+[*.cs]
+dotnet_diagnostic.SYSLIB1054.severity = none
+dotnet_diagnostic.CA5392.severity = none
+dotnet_diagnostic.CA2101.severity = none

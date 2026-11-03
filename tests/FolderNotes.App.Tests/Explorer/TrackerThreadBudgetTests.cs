@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 B.6 "Process thread budget" (Q2): 1 worker + 1 hook + 1 watchdog live, ≤ 6 abandoned workers, ≤ 1 abandoned hook thread.</summary>
+[Trait("Kind", "Deterministic")]
 public class TrackerThreadBudgetTests
 {
     [Fact]

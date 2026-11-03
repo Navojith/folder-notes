@@ -8,6 +8,7 @@ namespace FolderNotes.App.Tests.Explorer;
 /// reflection-based binding or UI. When T3.2.3 adds the COM layer it goes in its own subfolder, which these
 /// rules do not cover; the logic files listed here must stay clean.
 /// </summary>
+[Trait("Kind", "Deterministic")]
 public class ExplorerLogicSourceGuardTests
 {
     private static readonly string[] LogicFiles =
@@ -42,7 +43,7 @@ public class ExplorerLogicSourceGuardTests
     public void NFR01_The_engine_owns_no_thread_timer_or_interop()
     {
         var text = StripComments(File.ReadAllText(Path.Combine(RepoFiles.AppDir, "Explorer", "TrackerEngine.cs")));
-        Regex.IsMatch(text, @"(new Thread|Task\.Run|ThreadPool|new Timer|new System\.Threading\.Timer|LibraryImport|DllImport|Marshal\.|GeneratedComInterface|ComRef<)").ShouldBeFalse();
+        Regex.IsMatch(text, @"\b(new Thread|Task\.Run|ThreadPool|new Timer|new System\.Threading\.Timer|LibraryImport|DllImport|Marshal\.|GeneratedComInterface|ComRef<)").ShouldBeFalse();
     }
 
     /// <summary>04 B.7(c): the watchdog calls CoCancelCall with a thread id and reports a wedge; it touches no hook and no COM object.</summary>
@@ -50,7 +51,7 @@ public class ExplorerLogicSourceGuardTests
     public void NFR01_The_watchdog_thread_touches_neither_hooks_nor_COM_objects()
     {
         var text = StripComments(File.ReadAllText(Path.Combine(RepoFiles.AppDir, "Explorer", "Native", "WatchdogThread.cs")));
-        Regex.IsMatch(text, @"(HookThread|IWinEventApi|SetHook|Unhook|ComRef|ComObject|IShellWindows\w*|IShellBrowser|Marshal\.)").ShouldBeFalse();
+        Regex.IsMatch(text, @"\b(HookThread|IWinEventApi|SetHook|Unhook|ComRef|ComObject|IShellWindows\w*|IShellBrowser|Marshal\.)\b").ShouldBeFalse();
     }
 
     /// <summary>04 B.2: only the COM worker host and the COM folder may create COM objects; nothing outside them references ComRef or the interfaces.</summary>
@@ -67,7 +68,7 @@ public class ExplorerLogicSourceGuardTests
             }
 
             var text = StripComments(File.ReadAllText(file));
-            Regex.IsMatch(text, @"(ComRef<|GeneratedComInterface|IShellWindows|IShellBrowser|IWebBrowser2|IFolderView|IPersistFolder2)").ShouldBeFalse($"{rel} must not touch COM types (04 B.2)");
+            Regex.IsMatch(text, @"\b(ComRef<|GeneratedComInterface|IShellWindows\b|IShellBrowser|IWebBrowser2|IFolderView|IPersistFolder2)").ShouldBeFalse($"{rel} must not touch COM types (04 B.2)");
         }
     }
 
@@ -133,6 +134,10 @@ public class ExplorerLogicSourceGuardTests
         }
     }
 
+    /// <summary>Comments and the text of string literals are not code: a log message may name a type.</summary>
     private static string StripComments(string source) =>
-        Regex.Replace(Regex.Replace(source, @"/\*.*?\*/", "", RegexOptions.Singleline), @"//[^\n]*", "");
+        Regex.Replace(
+            Regex.Replace(Regex.Replace(source, @"/\*.*?\*/", "", RegexOptions.Singleline), @"//[^\n]*", ""),
+            "\"(?:[^\"\\\\\\r\\n]|\\\\.)*\"",
+            "\"\"");
 }

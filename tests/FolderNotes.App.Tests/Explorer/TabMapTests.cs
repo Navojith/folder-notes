@@ -37,6 +37,7 @@ internal sealed class FakeHandle : IDisposable
 }
 
 /// <summary>04 § C: the browser→tab cache (REQ-034, NFR-01 prompt release). Tests that count live handles use deltas.</summary>
+[Trait("Kind", "Deterministic")]
 public class TabMapTests
 {
     private static DiscoveredTab<FakeHandle> Tab(nint frame, nint tab) => new(frame, tab, new FakeHandle());

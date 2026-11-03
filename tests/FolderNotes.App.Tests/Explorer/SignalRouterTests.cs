@@ -3,6 +3,7 @@ using FolderNotes.App.Explorer;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 B.7 / J (H3, H4, H5): the router between the hook callbacks and the current worker.</summary>
+[Trait("Kind", "Deterministic")]
 public class SignalRouterTests
 {
     private sealed class Target : IWakeTarget
@@ -241,6 +242,7 @@ public class SignalRouterTests
     /// (the next round's raise would otherwise hide it, so every round ends with the check).
     /// </summary>
     [Fact]
+    [Trait("Kind", "Timing")]
     public async Task NFR01_No_signal_is_ever_lost_under_concurrent_raises_and_consumes()
     {
         var r = new SignalRouter();

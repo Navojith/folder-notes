@@ -78,6 +78,7 @@ internal sealed class EngineRig : IDisposable
 }
 
 /// <summary>04 L: the evaluation, hook-scope policy and recovery orchestration, against a fake Explorer on a fake clock.</summary>
+[Trait("Kind", "Deterministic")]
 public sealed class TrackerEngineTests : IDisposable
 {
     private readonly EngineRig _r = new();

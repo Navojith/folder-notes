@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 B.6 timing: cancel at 250 ms into an evaluation, abandon 1 s after the cancel; boundaries inclusive.</summary>
+[Trait("Kind", "Deterministic")]
 public class EvaluationWatchdogTests
 {
     private readonly FakeTimeProvider _clock = new();

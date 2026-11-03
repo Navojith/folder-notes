@@ -7,6 +7,7 @@ namespace FolderNotes.App.Tests.Explorer;
 /// 04 B.2, B.6, B.7 with real threads: the STA worker host, the watchdog thread and the supervisor (cancel → abandon →
 /// replace → breaker → cap). Time limits are scaled down (60 ms cancel, 120 ms abandon) so a wedge takes ~200 ms.
 /// </summary>
+[Trait("Kind", "Timing")]
 public sealed class WorkerSupervisorTests : IDisposable
 {
     private static readonly WatchdogOptions Quick = new() { CancelAfter = TimeSpan.FromMilliseconds(60), AbandonAfterCancel = TimeSpan.FromMilliseconds(120) };

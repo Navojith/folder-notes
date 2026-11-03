@@ -156,6 +156,7 @@ internal sealed class TrackerRig
 /// The pure parts working together (REQ-031 latency and ordering, REQ-034 tabs, D2 lost events, D3 coalescing,
 /// D4 abandoned workers, F recovery). Time is fake; "evaluation cost" is simulated.
 /// </summary>
+[Trait("Kind", "Deterministic")]
 public class TrackerLogicSimulationTests
 {
     private static TrackerRig OneFrame(string path = @"C:\a")

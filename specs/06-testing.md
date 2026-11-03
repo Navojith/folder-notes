@@ -126,6 +126,24 @@ permanent exhaustion at 6 with Retry refused; `Stop` bounded while wedged; stats
 measured and a slow one logged once. Note: these use real threads with scaled-down limits and generous waits, and passed repeated full runs; the
 interleavings that matter (router race, generation gate) have deterministic tests of their own.
 
+**Deterministic guarantees versus timing-based tests (T3.2.5).** Two kinds of ExplorerTracker test exist and must not be
+confused. *Deterministic*: pure logic on a fake clock, the router interleavings (test seams force each one), the
+generation gate, the engine on a fake desktop, source guards; a failure is a bug. *Timing-based*: anything with real
+threads, real sleeps/waits, the watchdog at scaled limits, and every real-Explorer test; they prove behaviour under
+realistic timing, can in principle flake, and a pass is evidence rather than proof. Each class carries
+`[Trait("Kind", "Deterministic")]` or `[Trait("Kind", "Timing")]` (real-Explorer ones: `Kind=RealExplorer`).
+
+**Real-Explorer verification protocol (T3.2.5; code in `tests/FolderNotes.App.Tests/Explorer/Real`).** Run with
+`FOLDERNOTES_REAL_EXPLORER=disposable dotnet test --project tests/FolderNotes.App.Tests -c Release --filter-trait "Kind=RealExplorer"`
+on an interactive **disposable** session or VM; otherwise every test is skipped. (A first sweep on the dev desktop coincided with a crash of the shell, 09 O-26, so the dev desktop is excluded until that is understood.) Safety: the lab opens its own windows and closes only those; it never
+closes, hangs, suspends or terminates the shell process or a window it did not open; keys are sent only after checking
+that the foreground window is the lab's; the one process it freezes (O-25) is a separate `explorer.exe` it started with
+`/separate`, checked not to be the shell and to host no earlier window, guarded by a detached resume helper. Explorer's own
+idea of each folder comes from an independent oracle (late-bound `Shell.Application`, the frame title), not from the tracker's
+interop. The person's desktop is in use, so an attempt that fails while a foreign window took the foreground is repeated
+(at most 3 times) and the attempt number is reported. Hook callbacks are counted by a decorator in the test, not in
+`TrackerStats`. Results go to `artifacts/t325/` and the report `specs/reports/T3.2.5-verification.md`.
+
 **Wedge:** a gateway call that blocks forever → cancel at 250 ms, abandon at 1 s, `Inactive` published, a new thread
 serves the next signal, the old thread's late result is discarded (generation), the UI thread is never blocked,
 `Stop` returns in ≤ 2 s even while wedged.

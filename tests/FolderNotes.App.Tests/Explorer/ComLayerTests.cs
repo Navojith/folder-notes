@@ -61,6 +61,7 @@ internal sealed class FakeShellWindowsGateway : IShellWindowsGateway
 }
 
 /// <summary>04 B.3 ComRef, the fake gateway with the real TabMap, and the real COM gateway on a real STA worker.</summary>
+[Trait("Kind", "Timing")]
 public class ComLayerTests
 {
     // ---- ComRef -------------------------------------------------------------------------------------

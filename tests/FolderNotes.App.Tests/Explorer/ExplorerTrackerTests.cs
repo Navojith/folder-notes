@@ -77,6 +77,7 @@ internal sealed class FakeWinEvents : IWinEventApi
 /// The whole composition with real threads and a fake desktop: events through a real hook thread, a real STA worker, the
 /// watchdog, the supervisor and the UI hand-off. Limits are scaled down (60/120 ms cancel/abandon).
 /// </summary>
+[Trait("Kind", "Timing")]
 public sealed class ExplorerTrackerTests : IDisposable
 {
     private readonly FakeExplorerDesktop _desk = new();

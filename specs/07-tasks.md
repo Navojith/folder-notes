@@ -301,7 +301,7 @@ smoke tests pass.
     recovery, latest-wins publishing through `IUiDispatcher`, `NotifyShellRestarted` from the tray window,
     `TrackerStats`, DI registration (not started). *Done when:* the logic tests plus fake-gateway recovery tests
     pass; `AppShell`/`App.xaml.cs` do not start it (guard test).
-  - [ ] **T3.2.5 ✅ Real-Explorer verification:** the integration and reliability tests, the idle-CPU
+  - [ ] **T3.2.5 ✅ Real-Explorer verification** *(partial 2026-11-03: see 09 O-25/O-26 and `specs/reports/T3.2.5-verification.md`; blocked on two user decisions and a disposable session)*: the integration and reliability tests, the idle-CPU
     measurement, P4 and the gated restart test where a disposable session exists (D5). *Done when:* 06 §
     ExplorerTracker tests pass on this machine (Windows 11 23H2); numbers (latency, evaluation cost, idle CPU,
     leak deltas) are recorded in 09; every "tunable" value in 04 is either confirmed or changed in the spec; the

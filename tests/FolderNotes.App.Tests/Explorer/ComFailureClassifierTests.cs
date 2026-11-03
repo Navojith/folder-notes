@@ -3,6 +3,7 @@ using FolderNotes.App.Explorer;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 § ExplorerTracker design B.5 (REQ-031, NFR-01). The table is the spec; these pin it.</summary>
+[Trait("Kind", "Deterministic")]
 public class ComFailureClassifierTests
 {
     [Theory]

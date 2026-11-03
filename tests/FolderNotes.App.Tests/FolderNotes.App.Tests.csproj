@@ -11,6 +11,10 @@
     <RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
     <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- LibraryImport in the real-Explorer lab (Explorer/Real) generates unsafe stubs. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- LibraryImport in the real-Explorer lab (Explorer/Real) generates unsafe stubs. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <!-- The App assembly already carries these initializers; a second copy collides via InternalsVisibleTo. -->
     <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>

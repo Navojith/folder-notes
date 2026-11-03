@@ -3,6 +3,7 @@ using FolderNotes.App.Explorer;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 D.6, D.7b, B.6: ordering, no-op suppression and abandoned-worker publication (REQ-031, NFR-01).</summary>
+[Trait("Kind", "Deterministic")]
 public class StatePublisherTests
 {
     private readonly List<ActiveFolderState> _delivered = [];
@@ -179,6 +180,7 @@ public class StatePublisherTests
     }
 
     [Fact]
+    [Trait("Kind", "Timing")]
     public async Task NFR01_No_delivery_from_an_old_generation_happens_after_Abandon_returns_under_concurrency()
     {
         var log = new List<(int Seq, string? Path)>();

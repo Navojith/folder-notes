@@ -308,6 +308,13 @@ setting (REQ-037). With the panel off the tracker is not running at all: no thre
    **latest-wins**: if several states wait for delivery only the newest is delivered; consumers drop anything
    with an older `Sequence`. `Current` returns the last published state without locking. `Inactive` = `FrameHwnd 0`.
    `Path = null` for virtual folders and anything the shell reports without a file-system path.
+   **Latest-wins is intentional (reviewed in T3.2.5).** The panel shows a level (which folder is active now), not a
+   history. Merging is therefore allowed to drop intermediate states, including an `Inactive` that was immediately
+   followed by another folder: the consumer sees one event with a newer `Sequence` and perhaps the same path as before.
+   Consumer contract: (1) compare `Sequence` and drop older events; (2) never count events or rely on seeing every
+   `Inactive` (a hide/show pair for a quick window switch may arrive as a single "new frame/path" state, which avoids
+   flicker); (3) treat equal path with a different `FrameHwnd` or `Sequence` as "refresh", not as "nothing happened".
+   Every state is still *published* in order by the `StatePublisher`; only delivery to the UI thread merges.
 
 #### E. Reading the path
 

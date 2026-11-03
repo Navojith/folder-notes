@@ -67,6 +67,7 @@ internal sealed class SchedulerRig
 }
 
 /// <summary>04 § ExplorerTracker design D: coalescing, confirm, retry ladder, poll, reconcile (REQ-031, NFR-06).</summary>
+[Trait("Kind", "Deterministic")]
 public class EvaluationSchedulerTests
 {
     private static readonly EvaluationOutcome Fg = new(true, false, EvaluationResultKind.Resolved);

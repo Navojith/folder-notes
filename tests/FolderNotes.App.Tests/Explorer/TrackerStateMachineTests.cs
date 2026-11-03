@@ -4,6 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 B.6 and F: lifecycle, the breaker, thread limits, abandoned-worker silence, recovery back-off.</summary>
+[Trait("Kind", "Deterministic")]
 public class TrackerStateMachineTests
 {
     private readonly FakeTimeProvider _clock = new();

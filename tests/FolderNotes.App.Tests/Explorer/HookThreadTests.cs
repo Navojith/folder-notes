@@ -5,6 +5,7 @@ using FolderNotes.App.Explorer.Native;
 namespace FolderNotes.App.Tests.Explorer;
 
 /// <summary>04 B.7 and J (H1-H11): the hook thread's lifecycle, with a fake WinEvent API and one real Win32 smoke test.</summary>
+[Trait("Kind", "Timing")]
 public class HookThreadTests
 {
     private sealed class FakeApi : IWinEventApi
