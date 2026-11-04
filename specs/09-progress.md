@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-03 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.5 (VM harness changes, then the VM runs). T3.2.6 frozen-server quarantine is done (04 § M). T3.2.5 stays PARTIAL until the VM runs (`specs/reports/T3.2.5-vm-test-plan.md`; blocked on disk space), the performance re-measurements and the manual checks. Report: `specs/reports/T3.2.5-verification.md`
+**Last updated:** 2026-11-04 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.5 (VM harness changes, then the VM runs). T3.2.6 frozen-server quarantine is done (04 § M). T3.2.5 stays PARTIAL until the VM runs (`specs/reports/T3.2.5-vm-test-plan.md`; existing VM `SchedShutdownTest`, guest build 26300.9457, being prepared), the performance re-measurements and the manual checks. Report: `specs/reports/T3.2.5-verification.md`
 
 ---
 
@@ -164,9 +164,11 @@ Collected from the specs so nothing gets lost. Close an item by recording the re
 
 | Since | Blocker | Needed from | Status |
 |---|---|---|---|
-| 2026-11-03 | Disposable VM for T3.2.5 cannot be created: C: has 10 GB free (≥ 60 GB needed, or an external NTFS SSD); Windows 11 Home has no Hyper-V, so VirtualBox 7.2.22 (installed) is used; the Windows 11 evaluation ISO must be downloaded by the user | user (disk space, ISO) | open |
+| — | none | — | — |
 
-Resolved: MSVC toolset missing (2026-10-31, fixed by installing the C++ workload) · .NET 10 SDK
+Resolved: disposable VM for T3.2.5 (2026-11-03: the user freed disk space, C: 38.5 GB free, and chose the existing VirtualBox VM
+`SchedShutdownTest` instead of a new one, since no ISO is available; its build 26300 differs from the host's 22631, see the plan
+§ 2) · MSVC toolset missing (2026-10-31, fixed by installing the C++ workload) · .NET 10 SDK
 missing (2026-10-31, 10.0.403 installed).
 
 ## Environment
@@ -178,11 +180,19 @@ missing (2026-10-31, 10.0.403 installed).
 | Windows App SDK | 2.5.1 |
 | C++ | VS 2022 Community 17.14, MSVC 14.44.35207, Windows SDK 10.0.26100, bundled CMake + Ninja |
 | Tests | xunit.v3 4.0.2 on Microsoft Testing Platform, Shouldly 4.3.0 |
-| Repo | local git, branch `main`, **no remote** |
+| Repo | git, branch `main`, remote `origin` = github.com/Navojith/folder-notes (pushed 2026-11-04) |
+| Test VM (T3.2.5) | VirtualBox 7.2.22 (on WHP/NEM), `SchedShutdownTest`: Windows 11 Home 26H2 **build 26300.9457** (Explorer 10.0.26100.9444), 4 vCPU, 4 GB, cable off, shares `drop` (ro) / `out` (rw); preservation snapshot `pre-T325-preserve-2026-11-03` |
 
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-03 (T3.2.5 VM: existing `SchedShutdownTest` inspected and partly prepared; no test run)
+- **Decisions (user):** reuse the existing VM (no ISO available); keep 4 GB RAM; add `drop` (ro) / `out` (rw) shares, `msi` unchanged; clipboard host-to-guest; network cable disconnected for the session (so Windows Update is not reconfigured); build 26300 caveat accepted: every result labelled with its build, **a clean VM run never closes O-26**; stop at ≤ 15 GB free on host C:; no snapshot deleted or consolidated without approval. Plan updated first (`specs/reports/T3.2.5-vm-test-plan.md` § 1, 2, 3, 5, 8).
+- **Done:** read-only inspection; powered-off preservation snapshot `pre-T325-preserve-2026-11-03` (child of `clean-win11`); VM settings above; guest (as `tester`, unelevated): .NET 10.0.14 runtime xcopied to `C:\dotnet` (no SDK needed: tests are executables, Windows App SDK self-contained), `C:\dumps`, OneDrive autostart removed (original logged). Guest facts: Explorer 10.0.26100.9444, SHELL32 10.0.26100.9278, UAC on, `tester` medium integrity like the host user (so no separate standard account), SMBIOS `innotek GmbH / VirtualBox`.
+- **Prep tooling (2026-11-04, approved by the user, not yet run):** `drop/prep-admin.ps1` (preflight; originals written via exclusive temp file, full-contract validation, no-overwrite rename and byte-level confirmation; guarded VERIFY; exit 0/1) and `drop/restore-admin.ps1` (independent, verified, idempotent steps). Host-side tests with fake systems: 206 + 65 checks, mutation-checked (`artifacts/vm/tests/`, git-ignored). Rename atomicity on the VirtualBox shared-folder provider is **not established**; nothing relies on it. DumpCount 3, one Defender exclusion (`C:\T325`).
+- **Pending:** elevated prep (`drop/prep-admin.ps1`: LocalDumps, WSearch/SysMain, Defender schedule + exclusions) needs the user to run it elevated in the VM (UAC blocks guest control); display 1920×1080 needs a VM window (headless ignores the mode hint); then a powered-off `S1-tools` snapshot. Harness changes (§ 7) not started. Host C: 38.5 → 36.2 GB free with the VM running.
+- **Unchanged:** A1/A2/A3b/A3 as approved; tracker not wired into `AppShell`; T3.2.5 unticked; nothing destructive on the host.
 
 ### 2026-11-03 (T3.2.6 built: frozen-server quarantine)
 - **Increments, each with deterministic tests:** (1) `CallJournal` per worker host: operations opened before the first outgoing call and closed after the last returned; sequence lock (torn reads are `Indeterminate`), generation and start-time checks (`Stale`), dangling operations closed and counted; engine and gateway operations with target pids; watchdog keeps `CoCancelCall`'s HRESULT per worker. (2) `Quarantine.cs`: `ServerIdentity` (pid + creation time), `Suspect` (known/candidates/unknown, conservative same-server rule), `QuarantineEntry`, `QuarantineRecord` (E1/E2, hold, minimum, narrowing, per-server trial budget) in `TrackerProcessGuard`; `TrackerStateMachine` with `Quarantined` (Waiting/Trial), `OnWedge(entry)` never replaces, `OnQuarantineTick`, `TrialStopped`, Retry Q19–Q24, `Availability`. (3) `Win32ServerProbe`, monitor on the watchdog thread (1 s, only while something is unresolved), supervisor rewrite (no replacement, no start-retry loop, trials, Stop/Start respect the record). (4) Stats: availability, entries, releases by evidence, trials, last cancel HRESULT, last wedge site, journal defects, pre-screened. (5) Hang pre-screen before path reads, enumerations and a worker's first connection.
