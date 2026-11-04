@@ -4,7 +4,7 @@ The status page for the project. `07-tasks.md` is the backlog (what to do and wh
 done). This file is the record of **where we are**. Update it at the end of every task or work
 session (see `CLAUDE.md`, workflow step 7).
 
-**Last updated:** 2026-11-04 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.5 (VM harness changes, then the VM runs). T3.2.6 frozen-server quarantine is done (04 § M). T3.2.5 stays PARTIAL until the VM runs (`specs/reports/T3.2.5-vm-test-plan.md`; existing VM `SchedShutdownTest`, guest build 26300.9457, being prepared), the performance re-measurements and the manual checks. Report: `specs/reports/T3.2.5-verification.md`
+**Last updated:** 2026-11-04 · **Current phase:** Phase 2 (App shell) · **Next task:** T3.2.5 (VM harness changes, then the VM runs). T3.2.6 frozen-server quarantine is done (04 § M). T3.2.5 stays PARTIAL until the VM runs (`specs/reports/T3.2.5-vm-test-plan.md`; existing VM `SchedShutdownTest`, guest build 26300.9457; **VM preparation complete 2026-11-04**, snapshot `S1-tools`), the performance re-measurements and the manual checks. Report: `specs/reports/T3.2.5-verification.md`
 
 ---
 
@@ -181,11 +181,19 @@ missing (2026-10-31, 10.0.403 installed).
 | C++ | VS 2022 Community 17.14, MSVC 14.44.35207, Windows SDK 10.0.26100, bundled CMake + Ninja |
 | Tests | xunit.v3 4.0.2 on Microsoft Testing Platform, Shouldly 4.3.0 |
 | Repo | git, branch `main`, remote `origin` = github.com/Navojith/folder-notes (pushed 2026-11-04) |
-| Test VM (T3.2.5) | VirtualBox 7.2.22 (on WHP/NEM), `SchedShutdownTest`: Windows 11 Home 26H2 **build 26300.9457** (Explorer 10.0.26100.9444), 4 vCPU, 4 GB, cable off, shares `drop` (ro) / `out` (rw); preservation snapshot `pre-T325-preserve-2026-11-03` |
+| Test VM (T3.2.5) | VirtualBox 7.2.22 (on WHP/NEM), `SchedShutdownTest`: Windows 11 Home 26H2 **build 26300.9457** (Explorer 10.0.26100.9444), 4 vCPU, 4 GB, cable off, shares `drop` (ro) / `out` (rw); preservation snapshot `pre-T325-preserve-2026-11-03`; prepared snapshot `S1-tools` (2026-11-04); display 1024×768 at 125 % |
 
 ## Log
 
 Newest first. One entry per session: what changed, what was learned, what's next.
+
+### 2026-11-04 (T3.2.5 VM preparation complete; documentation only, no run)
+- **Done:** elevated preparation ran in the guest (`drop/prep-admin.ps1`, exit 0, "all checks passed", **all seven VERIFY checks ok**: LocalDumps full dump x3 to `C:\dumps`, WSearch and SysMain Disabled/Stopped, Defender scan day 8 (never), exclusion `C:\T325`, real-time protection still on, Tamper Protection unchanged). Powered-off snapshot **`S1-tools`**, UUID `e4f16b63-4626-4678-a423-74c5d56209cb`, parent `pre-T325-preserve-2026-11-03` (`29ce564e-da4b-4d3d-8712-73b43598f68a`), taken 2026-11-04.
+- **Final VM configuration:** 4 vCPU, 4 GB, **1024×768 at 125 %** (the 1920×1080 plan was dropped: Microsoft Basic Display Adapter, VMSVGA driver not loaded; no fix attempted), cable off, clipboard host-to-guest, shares `drop` (ro) / `out` (rw) / `msi` (unchanged). Plan § 2 item 7 and the change log updated.
+- **Disk:** host C: **35.00 GB free** (VM off); stop threshold **≤ 15 GB free**.
+- **Preserved (git-ignored, do not delete):** originals `artifacts/vm/out/prep-admin.orig.json` (SHA-256 `12d24387…ee2f97`), log `artifacts/vm/out/prep-admin.log`.
+- **Not done:** harness changes (plan § 7), A1 or any run, restore, snapshot or file deletion. **T3.2.5 stays unticked** (PARTIAL).
+- **Next:** harness changes (VM-fingerprint gate, switches, collector), then deploy the build and take `S2-<commit>`.
 
 ### 2026-11-03 (T3.2.5 VM: existing `SchedShutdownTest` inspected and partly prepared; no test run)
 - **Decisions (user):** reuse the existing VM (no ISO available); keep 4 GB RAM; add `drop` (ro) / `out` (rw) shares, `msi` unchanged; clipboard host-to-guest; network cable disconnected for the session (so Windows Update is not reconfigured); build 26300 caveat accepted: every result labelled with its build, **a clean VM run never closes O-26**; stop at ≤ 15 GB free on host C:; no snapshot deleted or consolidated without approval. Plan updated first (`specs/reports/T3.2.5-vm-test-plan.md` § 1, 2, 3, 5, 8).
