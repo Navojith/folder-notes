@@ -315,6 +315,114 @@ smoke tests pass.
     leak deltas) are recorded in 09; every "tunable" value in 04 is either confirmed or changed in the spec; the
     REQ-031 evaluation cost is < 10 ms (closes the ❌ in 09). Restart recovery and Windows 10 are recorded as
     verified-by-fault-injection only if they could not be run (O-6, O-23).
+    **Sub-steps of the VM work** (one commit each; spec 06 § Lab harness safety H1-H8, ADR-026, plan `specs/reports/T3.2.5-vm-test-plan.md`).
+    They do not tick T3.2.5; it stays partial until the VM runs, the re-measurements and the manual checks are done:
+    - [ ] **T3.2.5.1 Specs** *(drafted 2026-11-04, awaiting review; ADR-026 is proposed, not accepted)* (NFR-01): H1-H8 in 06, ADR-026, this list, plan § 2/3/4/7/8/9, progress.
+      *Done when:* the five documents agree (same variable names, defaults, formats, scenario names, thresholds, snapshot names), no code,
+      test, script or VM state changed, the user's answers and review corrections (2026-11-04) are reflected, and the user approved the diff.
+    - [ ] **T3.2.5.2 Gate and marker script** (NFR-01; H1, H2): `RealExplorerGate` with injectable readers (SMBIOS bytes, marker key,
+      session information, environment), fail closed; the exact session check (not Session 0, same session as the shell, `WinSta0`,
+      unelevated) and the exact `disposable` / `1` comparisons; `DestructiveFact` + `[Trait("Destructive", "true")]` (this exact key and value, checked by the source guard and the test filter); `DestructiveGate.Require()`
+      evaluated before setup, at each cycle start and **immediately before every destructive operation** through the single
+      `DestructiveOps.Run` wrapper; the source-guard tests (every churn entry point tagged, primitives called only through the wrapper,
+      nothing under `tests/` or `eng/` writes the marker key); the defensive SMBIOS parser; the version-prescribed UUID interpretation;
+      `drop/provision-marker.ps1` with a verify-only mode (exact registry types and formats), its removal path and host-side
+      fake-system tests (including that an existing key is refused whatever it contains, even contents identical to what would be written; that the gate and the script both use the 64-bit registry view; and that `-Remove` refuses a key with any unexpected value, any changed content or any subkey). *Done when:* the gate tests pass (all conditions pass; each fails alone and is listed; a passing marker with a
+      failing environment gate still fails; each source unreadable; marker type, format, extra value or subkey, or a set default value; UUID mismatch; the
+      version rules (the range is `2.6 <= version < 4.0`: 1.9, 2.5, 4.0, 4.1, 255.255 and major 0 fail; 2.6, 2.10, 2.255, 3.0 and 3.255 pass; integer comparison with the string-ordering traps); the discrepancy case (only `straight` matches) fails without
+      switching; both forms equal fails; every synthetic-table boundary in 06 H1 including truncation at every length, the count cap,
+      trailing bytes and string decoding; session and elevation cases; a fake gate that turns false between two operations stops the
+      second), on this host every real-Explorer test is skipped, and the script is reviewed. **Each approval unit is separate (plan § 10): V, the verify-only session (boot, read-only run, capture of the real SMBIOS fixture, clean shutdown, as one approval); P, the provisioning session; and M, taking `S1b-marker`.**
+    - [ ] **T3.2.5.3 Switches** (H3): `LabSwitches` for `FOLDERNOTES_LAB_ORACLE` / `_TRACKER` / `_LOAD`, strict validation, the four-combination
+      final-state check, unique leaf names per lab folder (a duplicate is inconclusive), the title outcomes match / mismatch /
+      unavailable. *Done when:* tests cover every accepted value, every invalid form (empty, `1`, `true`, `L7`), a nonzero load without
+      the opt-in, the four combinations with a fake lab (A1 title only; **A2 oracle path against the frame title at leaf-name level, with an unavailable title inconclusive**; A3b leaf-name only; A3 full path), an unavailable title (empty,
+      generic, unrecognised format, and the pre-churn probe failing) giving inconclusive rather than pass, and a mismatching title giving
+      a failure; the defaults reproduce today's behaviour.
+    - [ ] **T3.2.5.4 Churn driver** (H4): the L1-L6 ladder (3 cycles per level), the A4 stage as the A3 switches at L6 for 10 runs (started only after the complete A3 L1-L4 ladder is reported and approved, and from the same S2 baseline restoration), the
+      five-category failure classification (functional / crash / safety-gate or disk / evidence / infrastructure) with its actions,
+      the approval units (initial run of a named stage, one restore-and-run unit, a named batch only on explicit words), the
+      delivered-load rule (L1-L5 exact; L6 at least 44 tabs per window; otherwise inconclusive, not a pass and not a failure), and the
+      result-row fields. *Done when:* driver tests on a fake lab show each category's action (including no repetitions after a gate or
+      disk failure and `inconclusive` on an evidence failure); that after any failure the driver preserves the VM state and neither
+      restores nor starts another run without an approval token; that one token covers exactly one unit; that a named batch covers
+      exactly its count, stops at the first failure and does not extend to another level; that a stage's initial run needs its own
+      token and the S2 token does not satisfy it; that before an I(stage) token is consumed the runner prints and logs the stage, the
+      three switch values, the levels, the snapshot name and UUID and the planned maximum number of runs, and refuses a run that would
+      exceed that maximum; that the runner **waits for the person's explicit confirmation of the printed summary** and, without it, neither consumes the approval nor starts the stage; **run counts from the one table (06 H4): A1, A2 and A3b 23, A3 12, A4 10**, a token authorizes exactly its stage's count (the 24th run of A1 is refused), and an R token authorizes exactly one restore-and-run unit, or a named batch's count; that A4 is refused unless A3's full L1-L4 ladder is recorded as reported; at L6 that 46 tabs opened is a delivered, passing load, 43 is "load not delivered", and
+      reaching the limit is never classified as a failure; and that **every row carries**: build + UBR, Explorer and SHELL32
+      versions, level, cycle, repetition number, the three switch values, `windows_requested`/`windows_opened`,
+      `tabs_requested`/`tabs_opened`, delivered yes/no, display `1024×768 at 125%`, start and end timestamps with UTC offset and zone
+      id, starting snapshot name and UUID, harness and shell session ids and elevation state, result, and failure details.
+    - [ ] **T3.2.5.5 Evidence collector and process watcher** (H5): shell-process handles with a defined lifecycle, 250 ms poll (labelled
+      "observed"), `observed_at` kept apart from `exit_time` (`GetProcessTimes`), event-log export, WER and dump collection with a SHA-256
+      manifest, explicit `FAILED` entries, and the evidence-space rules of H6 (no elevated listener at this stage). *Done when:* tests prove
+      it is read-only, hashes match, a missing or locked source yields a `FAILED` entry and an incomplete mark, the originals are
+      untouched, `exit_time` is read from the handle and `null` with a reason when the call fails, a poll-only exit has no exit time, and
+      `observed_delay` is computed only when both exist; with a fake process API, a shell restart yields a new handle and an incremented
+      `shell_generation`, a second restart works, a failed open is recorded, a pid change without a signal takes the exit data from the
+      old handle and is marked "not directly observed", and all handles are closed at the end; and with a fake free-space source a file
+      is copied only when the budget and the floor allow it (exactly at the floor, one byte either side), smallest first, otherwise an
+      explicit `FAILED: insufficient host space` or `FAILED: evidence budget exceeded` entry is written and nothing is deleted (the only deletion is the aborted copy's own incomplete destination file, below); **the
+      emergency rule** (06 H6): with free space at or below the hard stop (14 GiB) a 7 GiB dump is still copied (14 - 7 > 5) and a
+      10 GiB one is not, the hard stop never blocks a permitted evidence copy, and the copy is chunked: with the free-space source
+      faked to fall to the floor mid-copy the copy aborts, only that copy's own incomplete destination file is removed (source, completed evidence and sibling files stay byte-identical),
+      `FAILED: host free space fell to floor during copy` is recorded with bytes copied, free space at the abort and the deletion
+      outcome, and no further copy starts; a **failing delete** is recorded with the remaining usage and not retried.
+    - [ ] **T3.2.5.6 Disk guard** (H6): host-side read-only monitor with **separate** free-space sampling (every 30 s) and heartbeat (every 15 s,
+      carrying sequence numbers and the last sample time), per-run stop flags, thresholds in bytes (GiB), and the runner's check before
+      every action. *Done when:* tests with a fake free-space source show, at each of the five thresholds (25, 20, 15, 5 and 10 GiB in
+      bytes) exactly the threshold, one byte above and one byte below behaving as H6 states (start only above 25; warning and stop
+      inclusive); a prominent warning without a stop at or below 20 GiB; no **filesystem** deletion in the evidence collector or the disk-guard implementation except the aborted evidence copy's own incomplete destination file (source guard over those two components: the only delete call takes the path the copy created; the marker script's registry removal is a separate subject, tested in T3.2.5.2); a stop flag from another run id, or in
+      another run's folder, ignored and logged, a flag for the current run id stops it, and an unparsable flag in the run's own folder
+      stops it; a missing heartbeat, an expired heartbeat or sample (by sequence progress on a fake monotonic clock) and `free_bytes` at
+      or below the stop are each a disk-guard failure; a partial or unparsable heartbeat keeps the last valid one until the limit;
+      **clock handling on a fake monotonic clock and a fake UTC clock:** a constant 2-hour guest-host offset passes and is only
+      recorded, a guest clock step forward or back of more than 30 s (as after a restore), detected by **elapsed guest UTC against elapsed runner monotonic time from the baseline recorded at the first valid heartbeat** (a constant offset still passes; a 20 s step is below the limit and passes), gives `CLOCK_INCONSISTENT`, a host timestamp that is
+      ahead of or behind elapsed runner time by more than 30 s gives `CLOCK_INCONSISTENT`, a non-increasing `heartbeat_utc` is rejected, a **repeated sample time with an unchanged `sample_seq` is accepted** (15 s heartbeats,
+      30 s sampling), a sample time that **does not strictly increase when `sample_seq` increases**, moves backwards, changes without a `sample_seq` change, or goes with a falling `sample_seq` is
+      rejected, a sample later than its heartbeat is rejected, a sample more than 120 s older than its heartbeat is rejected, and a stalled `seq` is stale
+      even when its timestamps look fine; **snapshot operations:** the monitor keeps running during a snapshot take or restore, the
+      harness never cancels or kills one, **a fake free-space source crossing the hard stop while a fake snapshot operation is in
+      progress** lets the operation end and then blocks further snapshot, restore and boot (report, wait for approval), and a failure for lack of space is reported as an infrastructure plus disk-guard failure with no retry or deletion;
+      **mid-cycle behaviour:** a breach between two actions issues no further action, a breach
+      during a wait ends the wait within about a second, the action in flight is not aborted, lab windows are left open, and an
+      evidence copy already begun continues under the floor rule (and aborts at the floor).
+    - [ ] **T3.2.5.7 Instrumentation** (H7): `CoCancelCall` record into the bounded lock-free multi-producer / single-consumer queue of the
+      H7 contract (slot states, claim by successful compare-exchange only, lap-encoded sequence numbers, release/acquire ordering,
+      bounded retries, drop-on-full with a counter); COM-wait and internal samples recorded in `TrackerCounters` under its **existing lock**
+      (three samples in one critical section, no new lock) and reported through new `TrackerStats` fields. *Done when:* the record has
+      all fields; the interval tests hold (`COM wait <= total`, no double count of nested calls); the on/off differential test shows
+      identical state traces, decisions and results; and the H7 tests pass: a throwing builder or sink is swallowed with unchanged
+      decisions; a full queue returns with the other threads held (non-blocking by structure, with a hang guard that is not a latency
+      threshold), `dropped` increments and decisions are unchanged; a blocked drain thread does not block a producer; the queue contract
+      tests pass (counters are `ulong`, comparisons use the signed modular `diff` and never a raw `<`/`>`; wraparound beyond N laps **with
+      `enq`/`deq` seeded at `ulong.MaxValue - k`, k = 0..2N**, plus seeds at 2^32 and 2^63, and a `diff` unit test at the extremes; the
+      region between the successful claim and the publish contains no allocation, throwing call, lock, I/O or wait (source guard), and a
+      held producer lets the others fill N - 1 slots then drop and count; exactly N accepted with a
+      stalled consumer and `accepted + dropped` equal to attempts; the claim-to-publish seam; the read-to-release seam; several producers
+      racing a slow consumer with no torn record, duplicate or uncounted loss); two overlapping worker generations plus a reader never
+      yield a mixed timing set; the source guards hold (no blocking primitive on the enqueue path, `_gate` sections contain only array
+      reads and writes, the watchdog path does not take the `TrackerCounters` lock). The timing windows are not described as lock-free or
+      single-writer anywhere.
+    - [ ] **T3.2.5.8 Build, staging and guest runner** (H8): host build; `stage-vm.ps1` producing `drop/stage/<commit>/` with the three
+      **required** entries `run-lab.ps1`, `stage-manifest.json` (outside the payload, listing `payload/` only) and `payload/` (other
+      entries are ignored), refusing to overwrite an existing `<commit>` directory; the allowlist and secret scan on the payload;
+      `stage-report.txt` with the pinned hashes; the guest runner that checks its own hash (safeguard only), reads the manifest **once
+      into a byte array that it hashes and then parses**, authenticates it by the pinned SHA-256 before parsing, validates it,
+      verifies exactly `payload/` while copying it to a guest-local directory (hashing the bytes as copied; the run id, run folder and disk monitor exist **before** the copy and the disk guard is checked before each file) and runs only that copy;
+      the guest procedure that compares the runner's hash with the staging report **before every execution**. *Done when:* staging
+      refuses a planted secret, an unlisted file **planted inside `payload/`** and an existing `<commit>` directory (and, separately, the guest runner **ignores** a stray entry elsewhere in the stage directory), and prints both hashes; the runner refuses (a) a
+      modified payload file, (b) a **coordinated change of a payload file and its manifest entry** (the pinned manifest hash no longer
+      matches), (c) a missing, malformed or wrong `-ExpectedManifestSha256`, (d) an extra file inside `payload/`, (e) a manifest path
+      that breaks any 06 H8 path rule (`..`, drive letter, UNC, alternate data stream colon, reserved device name with or without an
+      extension, trailing dot, backslash, empty component, `~` short name, over-length, a case-fold duplicate, a reparse point) or an
+      invalid `<commit>` (not `^[0-9a-f]{7,40}$`), (f) a wrong `-ExpectedRunnerSha256`, (g) a missing required entry, and (h) a
+      failing gate; a manifest that changes between hashing and parsing cannot be parsed (the same bytes are used), and a payload file
+      that changes on the share after the copy does not change what runs; it does **not** refuse because of the manifest, the runner, a
+      stray file elsewhere in the stage directory or other files in `drop` (ignored and never executed); it logs its own hash at every
+      start; the runbook states the per-execution hash comparison; and nothing real runs on the host. **S2 is its own approval unit
+      (S), and approval to create S2 is not approval to run any stage (I).**
 - [ ] **T3.3 🧱 PanelDocker** (REQ-030, 033, 038), production version of S2: position modes,
   DPI, snap and maximize handling.
 - [ ] **T3.4 🧱 Companion panel UI** (REQ-032, 035, 036, 037): states, inline edit, pin,

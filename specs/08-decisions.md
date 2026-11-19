@@ -492,3 +492,114 @@ live, with two corrections to this ADR's first draft: release is `ComObject.Fina
 on, shown against a scratch server, not Explorer. WinEvent callbacks run during the wait (re-entrancy is real, handled
 by trivial callbacks). Scoping the hook to Explorer's process removes all foreign callbacks. P4 and the real restart stay
 open (D5, O-24).
+
+
+---
+
+## ADR-026: Lab harness safety: two complementary identity controls, a destructive opt-in, validated switches, read-only evidence — *proposed (T3.2.5 Step 1, 2026-11-04; revised the same day after the user's answers to Q1-Q5 and two diff reviews); a draft until the user accepts the diff*
+
+**Context:** Destructive Explorer scenarios (churn, freeze, kill) may run only in the disposable VM (user decision 2, ADR-025). The first
+gate was one environment variable plus an SMBIOS manufacturer/model check. SMBIOS alone also matches any other VirtualBox guest, and an
+environment variable alone is easy to set on the wrong machine (the first sweep on the dev desktop coincided with the shell crash,
+O-26). The O-26 isolation matrix needs oracle and tracker switches that must not silently fall back to defaults, and its evidence must
+survive a crash and the restore that follows.
+**Decision:**
+1. **Two complementary identity controls, fail closed** (not independent proofs: the marker records the SMBIOS UUID). (a) SMBIOS:
+   `innotek GmbH` / `VirtualBox` and the VM's system UUID (`5537d76c-7c7a-4d5f-8f04-67d97d1f1763`). (b) A guest-side marker,
+   `HKLM\SOFTWARE\FolderNotesLab`, with exactly eight values and no unnamed default value, read and written through the 64-bit registry view (06 H1 table: `MarkerId` = `FN-T325-DISPOSABLE-VM-v1`,
+   `SmbiosUuid`, `UuidConversion` and `SmbiosVersion` as `REG_SZ`, `SmbiosUuidRaw` as `REG_BINARY` of 16 bytes, and the informational
+   `VmName`, `ProvisionedOn` and `PreservationSnapshot` as `REG_SZ`), provisioned deliberately by an elevated script the user runs
+   (which **refuses if the key exists at all** and never adopts or overwrites one), never created by the harness, removed on the
+   user's word. Any failed or unreadable check means no. **The UUID
+   interpretation is prescribed by the SMBIOS version, not inferred:** `mixed-endian` for SMBIOS `2.6 <= version < 4.0`; a version below 2.6, from 4.0 onward, or unreadable has
+   no prescribed interpretation and fails closed (numeric comparison; no per-minor whitelist). The comparison with the host's `hardwareuuid` only validates the identity: if the
+   prescribed interpretation does not reproduce it, provisioning fails and reports a discrepancy (also when the `straight` form would
+   have matched) and never switches. A UUID for which both forms agree also fails. The SMBIOS table is parsed defensively (numeric
+   version compare, length bounds, a structure-count cap, end-of-table with only zero padding after it, exactly one Type 1 long enough
+   for the whole UUID field, strict ASCII strings, no all-zero or all-`0xFF` UUID), tested on synthetic tables first and the real-VM
+   fixture later. The interactive-session check is exact (not Session 0, same session as the shell, `WinSta0`, harness unelevated), and
+   `FOLDERNOTES_REAL_EXPLORER` must equal `disposable` ordinally and case-sensitively. The marker is **not a substitute for the
+   environment gate**: each condition is evaluated separately, none short-circuiting another.
+2. **Destructive tests need three things:** the disposable-VM gate, `DestructiveFact` (which applies `[Trait("Destructive", "true")]`; every churn test), and
+   `FOLDERNOTES_LAB_DESTRUCTIVE=1`. None replaces another. The complete gate is evaluated before test setup, at the start of every
+   cycle, and **`DestructiveGate.Require()` immediately before every destructive operation** (each freeze, kill, P4 and P7 action, and
+   each churn phase), never cached; the primitives are reachable only through one wrapper that calls it first, and a source-scan
+   test catches an untagged churn test or a primitive called around the wrapper.
+3. **Switches** `FOLDERNOTES_LAB_ORACLE` / `_TRACKER` (`on`/`off`, default `on`) and `_LOAD` (`0`, `L1`-`L6`, default `0`) are validated
+   together; an invalid value fails the run loudly; a nonzero load without the destructive opt-in is a configuration error. The four
+   oracle/tracker combinations map to A1, A2, A3b and A3, each with a defined final-state check (06 § H3). **A4 is a stage, not a fifth combination:** it uses the A3 switches at `LOAD=L6` for 10 runs (A3 is the reduced L1-L4 ladder). Title-only and leaf-name checks are explicitly **weaker** than a full-path comparison (same-named folders are indistinguishable), so lab folders get unique leaf names and a duplicate is inconclusive, never a pass; a title Explorer does not expose in a recognised form is *unavailable*, also inconclusive.
+4. **Screening, not proof; failures are classified.** L1-L6 with 3 cycles per level. **On any failure: stop, collect evidence, preserve the
+   VM state, report, and wait for the user's approval.** **One approval authorizes exactly one snapshot restore and the one run that
+   starts from it**; the next repetition needs its own approval, unless the user approves a **named batch** in explicit words, which
+   covers exactly that many restore-and-run units at that level, ends at the first failure of any category, and never carries over. This **recovery rule (R)** is distinct from **I(stage)** (point 10), the deliberate exception: one restore plus the complete initial ladder of one named stage. Terms: a *run* is one cycle at one level; a *restore-and-run unit* is one restore plus one run (R); an *initial stage run* is one restore plus all runs of the stage's ladder (I; A1/A2/A3b 23, A3 12, A4 10: 06 H4); a *repetition* exists only under R.
+   Functional failure: stop climbing; after approval, restore the baseline and run the repetitions (3 at that level) under those
+   boundaries. Crash or Explorer process failure: stop immediately; repeat only after approval and a restore. Safety-gate or
+   disk-guard failure: stop all activity, no repetitions. Evidence-collection failure: inconclusive, no automatic repetition, stop
+   progression until resolved. Infrastructure failure: stop the stage, report separately, not a tracker failure. Each result records
+   build, versions, level, cycle, display, timestamps with zone, the starting snapshot and the session and elevation state.
+5. **Evidence is read-only and honest about gaps.** Copy, hash (SHA-256), manifest, explicit `FAILED` entries. Process monitoring is the
+   shell-process handle (reliable for that process only) plus a supplementary 250 ms poll (new PIDs); neither guarantees every
+   short-lived `explorer.exe` is captured, and the output is "observed", not "complete". The time the watcher observed a
+   termination and the actual exit time (`GetProcessTimes` on the terminated handle) are recorded apart. **No elevated listener** at
+   this stage.
+6. **Disk:** GB means GiB and thresholds are compared in bytes, inclusively: a run, stage or snapshot starts only above 25 GiB; warning at or
+   below 20 GiB (prominent log, no stop); hard stop at or below 15 GiB; evidence copies need free space after the copy above a 5 GiB
+   floor and stay within a 10 GiB per-run budget, smallest first, with an explicit `FAILED` entry otherwise (the VM state is preserved,
+   so nothing is lost); nothing is deleted to recover space (the single exception: the incomplete destination file of an evidence copy that aborted at the floor; the source and completed evidence are never touched; the abort, bytes copied, free space and deletion outcome are recorded; a failed delete is reported and not retried). **The hard stop ends test work and discretionary operations, not
+   evidence preservation:** an emergency copy may proceed at or below the hard stop under the floor and budget rules, is chunked and
+   re-checks the floor before each chunk, and aborts (removing only its own partial file) if the floor is reached. Snapshots are taken
+   powered off, the monitor stays on during them, and the harness never interrupts a snapshot operation. Stop flags belong to a run id. The monitor samples free space every 30 s and
+   writes a heartbeat every 15 s carrying sequence numbers and the last sample time (`heartbeat_utc` strictly increases; the sample time never
+   moves backwards and is identical while `sample_seq` is unchanged). **Freshness is judged only by sequence progress on
+   the runner's monotonic clock**; timestamps are consistency checks that need no synchronized clocks (ordering on the host clock, and
+   rate consistency of elapsed host time, and of elapsed guest UTC, against elapsed runner monotonic time (a guest clock step beyond 30 s is detected; a constant offset is not), with the guest-host offset recorded but not required to be
+   small), and an inconsistency is a defined `CLOCK_INCONSISTENT` disk-guard failure. Files are written temp-then-rename and a partial
+   file is never trusted. On a breach the runner checks before every individual action and at least once a second during waits, lets the
+   action in flight finish, issues no further action, leaves the lab windows as they are and lets evidence collection already begun
+   complete.
+7. **Instrumentation** (cancel HRESULT record, COM-wait/internal split) must not change tracker decisions, timeouts, cancellation or
+   transitions, and never does I/O, COM or waiting inside its critical section or enqueue path. Two mechanisms, stated apart: the
+   **cancel records** go to a bounded, lock-free multi-producer / single-consumer queue (64 slots; a sequence-numbered bounded queue with defined slot states: a slot is claimed only by a
+   successful compare-exchange, so a full queue creates no gap; lap-encoded sequence numbers prevent reuse confusion; `ulong` counters compared only by signed modular difference, so wraparound at
+   2^64 is safe (tested with counters seeded near the maximum); the design assumes a producer that wins the claim publishes, with nothing
+   that can throw or block in between, and a stalled producer delays only the consumer; release/acquire
+   ordering; bounded retries; drop-on-full with a counter; 06 H7 gives the full contract; its producer is in practice the one watchdog
+   thread, which persists across worker generations, but correctness does not depend on that); the **timing samples** stay in
+   `TrackerCounters` under its **existing lock** (shared by all worker generations, so overlapping writers from an abandoned and a
+   replacement worker are expected), with the three samples of an evaluation written in one critical section, and readers copying
+   under the lock. The timing windows are explicitly **not** described as lock-free or single-writer: a worker may wait for another
+   thread's bounded, memory-only critical section. The split is a residual and is not claimed to cover all elapsed time.
+8. **Host builds, guest runs;** the host never runs real-Explorer or destructive tests. Required entries of `drop/stage/<commit>/`: `run-lab.ps1`
+   (outside the manifest and the payload, hash pinned separately and compared by the person against the staging report
+   **immediately before every execution**),
+   `stage-manifest.json` (outside the payload; lists `payload/` only, never itself), and `payload/` (the authenticated files). The
+   runner authenticates the manifest by a **pinned SHA-256 supplied out-of-band** (not read from `drop`) before parsing it, then
+   verifies `payload/` against it; the extra-file check applies to `payload/` only, and other entries in the stage directory are
+   ignored (never executed, not part of the integrity check, never a refusal). The manifest is read once into a byte array that is both
+   hashed and parsed (no time-of-check/time-of-use gap), and its paths are validated against an allowlist with Windows-specific rejections
+   (alternate data streams, reserved device names, trailing dots, backslashes, short names, normalization equivalents, reparse points; the
+   `<commit>` is lowercase hex only), and the runner executes a **guest-local copy of `payload/` hashed while it is
+   copied**, from a read-only `drop` whose `<commit>` directory is never overwritten. A coordinated change of a payload file and its
+   manifest entry fails on the pinned hash. The guest runner and the test code each enforce the gate.
+
+9. **Snapshots:** `S1-tools` stays unchanged (prepared, no marker). After the user approves provisioning and the verified marker, and after
+   a clean shutdown and a second approval, **`S1b-marker`** is taken as a child of `S1-tools`; `S2-<commit>` is a later child of `S1b-marker`.
+10. **Approval units** (each a separate permission; none implies another; plan § 10): V the verify-only session (boot, read-only run,
+    fixture capture, clean shutdown); P the provisioning session; M taking `S1b-marker`; S the S2 session (boot, non-destructive
+    preflight, clean shutdown, taking `S2-<commit>`); **I(stage) the initial run of one named stage** from S2 (one restore, boot, settle and the stage's whole ladder to its first failure;
+    the runner states the stage, switches, levels, snapshot (name, UUID) and the explicit maximum run count, and the person explicitly confirms that summary, before the approval is consumed; approval to create S2 is
+    not approval to run any stage; A4 additionally needs the complete A3 ladder reported); R one recovery restore-and-run unit or a named batch (point 4).
+
+**Consequences:** the host can never pass the gate. Another disposable session (a CI runner) would need its own marker and an
+amendment to this ADR before any real-Explorer test runs there; until then those tests are skipped everywhere but the T3.2.5 VM. The
+marker is one more VM change (plan change log, restore list) and cannot be applied without separate approval. If the VM is cloned or
+re-registered its UUID changes and the gate fails closed until the ADR is amended. Gates stop accidents, not intent.
+**Resolved (user answers, 2026-11-04):** Q1 marker lives in a separate `S1b-marker` child of `S1-tools` (point 9). Q2 the interpretation is
+prescribed by the SMBIOS version and validated, never inferred, and logged at provisioning; a contradiction fails (point 1). Q3 no elevated listener (point 5). Q4 20 GB is a warning only
+(point 6). Q5 any failure stops the ladder, classified into five categories (point 4).
+**Still open:**
+- U1 *Provisioning approval.* The marker is not provisioned and the VM is not booted. Booting to read the real SMBIOS bytes, running the
+  verify-only mode and then provisioning each need the user's explicit approval; the real-VM fixture for the conversion test does not exist yet.
+  If VirtualBox reports an SMBIOS version outside `2.6 <= version < 4.0` (or one that cannot be read), provisioning reports the incompatibility and stops; the gate cannot pass, and
+  nothing changes until the user decides on an amendment to this ADR. The interpretation is never changed on the spot.
+- U2 *`S1b-marker` snapshot approval* (after the verified, cleanly shut-down VM). Not taken.
